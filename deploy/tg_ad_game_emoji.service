@@ -1,0 +1,14 @@
+[Unit]
+Description=Telegram-бот: игра «Мемори» в посте канала
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/tg_ad_game_emoji
+ExecStart=/opt/tg_ad_game_emoji/.venv/bin/python -m game
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
