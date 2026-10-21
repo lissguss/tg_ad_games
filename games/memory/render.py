@@ -11,11 +11,13 @@ callback_data:
 """
 from __future__ import annotations
 
-from .config import ROOT
+import pathlib
 from .logic import CARDS, COLUMNS, WON
 from .storage import Session
 
-POST_FILE = ROOT / "post.txt"
+POST_FILE = pathlib.Path(__file__).resolve().parent / "post.txt"
+# все кнопки этой игры; роутер мемори принимает только их
+CALLBACK_RE = r"^(p:\d+|(c:\d+|new:-):\d+:\d+)$"
 FIELD_MARK = "[ПОЛЕ]"
 BACK = "❓"
 FOUND_STYLE = "success"  # найденные пары — зелёные

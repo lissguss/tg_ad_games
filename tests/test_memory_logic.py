@@ -1,7 +1,7 @@
 import random
 from collections import Counter
 
-from game.logic import (
+from games.memory.logic import (
     CARDS, EMOJIS, FLIP_DELAY, MSG_ALREADY_OPEN, MSG_FINISHED, PLAYING, WON, Game, generate_layout,
 )
 

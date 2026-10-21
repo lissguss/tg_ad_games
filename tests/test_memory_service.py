@@ -4,12 +4,12 @@ import time
 
 import pytest
 
-from game import render
-from game.logic import CARDS, EMOJIS, FLIP_DELAY, MSG_ALREADY_OPEN, PLAYING, WON
-from game.service import (
+from games.memory import render
+from games.memory.logic import CARDS, EMOJIS, FLIP_DELAY, MSG_ALREADY_OPEN, PLAYING, WON
+from games.memory.service import (
     CARD, MSG_EXPIRED, MSG_RESTORED, MSG_STALE_SCREEN, NEW_GAME, GameService,
 )
-from game.storage import Storage
+from games.memory.storage import Storage
 
 U1, U2, CHAT, POST = 111, 222, -100, 7
 LAYOUT = [EMOJIS[i // 4] for i in range(CARDS)]  # пары: (0,1), (2,3), (4,5) ...
@@ -185,7 +185,7 @@ def test_layout_hidden_from_message(service):
 
 def test_post_contains_text_and_field():
     html = render.public_post()
-    assert "<b>Разгадываем секрет трёх эмодзи 🔍</b>" in html
+    assert "<p>Спрятали под кнопками шесть пар эмодзи. Сможете найти все?</p>" in html
     assert html.count("❓") == 12
     assert html.count("<tg-button-row") == 4
     assert render.FIELD_MARK not in html
@@ -202,7 +202,7 @@ def test_callback_data_fits_64_bytes(service):
 
 
 def test_repeated_post_presses_warn_about_old_client(service):
-    from game.service import MSG_NOT_SHOWN
+    from games.memory.service import MSG_NOT_SHOWN
     first = run(service.press_on_post(U1, CHAT, POST, 0, now=100))
     assert not first.alert
     second = run(service.press_on_post(U1, CHAT, POST, 1, now=103))

@@ -1,0 +1,14 @@
+[Unit]
+Description=Telegram-бот: игры в постах канала («Мемори», «Взломайте телефон»)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/tg_ad_games
+ExecStart=/opt/tg_ad_games/.venv/bin/python -m bot
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

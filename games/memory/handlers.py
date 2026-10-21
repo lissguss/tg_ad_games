@@ -1,4 +1,4 @@
-"""Обработчики Telegram: нажатия кнопок, автопереворот пар и админ-команды в личке."""
+"""Обработчики Telegram: нажатия кнопок и автопереворот пар. Команды публикации — в bot/admin.py."""
 from __future__ import annotations
 
 import asyncio
@@ -7,17 +7,14 @@ import time
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
-from aiogram.filters import Command, CommandStart
 from aiogram.types import (
     CallbackQuery,
     EphemeralMessageParameters,
     InputRichMessage,
-    Message,
     Update,
 )
 
 from . import render
-from .config import Config
 from .service import GameService, Outcome
 from .storage import Key, Session
 
@@ -94,7 +91,7 @@ def _log(where: str, user_id: int, post_id: int, action: str, out: Outcome) -> N
              g.status, len(g.found), out.toast or "")
 
 
-@router.callback_query()
+@router.callback_query(F.data.regexp(render.CALLBACK_RE))
 async def on_callback(cq: CallbackQuery, bot: Bot, event_update: Update, service: GameService):
     if not service.storage.mark_update(event_update.update_id):
         return  # этот update уже обработан
@@ -159,26 +156,3 @@ async def on_callback(cq: CallbackQuery, bot: Bot, event_update: Update, service
     schedule_flip(bot, service, out.session)
     await cq.answer(out.toast, show_alert=out.alert)
 
-
-# --- личка с ботом ---
-
-@router.message(CommandStart(), F.chat.type == "private")
-async def on_start(message: Message, config: Config):
-    if message.from_user.id == config.admin_id:
-        await message.answer(
-            "Команды администратора:\n"
-            "/publish — опубликовать игру «Мемори» в канал"
-        )
-    else:
-        await message.answer("Привет! Я веду игру «Мемори» в канале. Играть можно прямо в посте.")
-
-
-@router.message(Command("publish"), F.chat.type == "private")
-async def on_publish(message: Message, bot: Bot, config: Config):
-    if message.from_user.id != config.admin_id:
-        return
-    sent = await bot.send_rich_message(
-        chat_id=config.channel_id, rich_message=InputRichMessage(html=render.public_post()),
-    )
-    log.info("опубликован пост %s", sent.message_id)
-    await message.answer("Игра опубликована в канал.")
