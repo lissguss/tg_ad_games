@@ -7,7 +7,7 @@ import pytest
 from games.memory import render
 from games.memory.logic import CARDS, EMOJIS, FLIP_DELAY, MSG_ALREADY_OPEN, PLAYING, WON
 from games.memory.service import (
-    CARD, MSG_EXPIRED, MSG_RESTORED, MSG_STALE_SCREEN, NEW_GAME, GameService,
+    CARD, MSG_EXPIRED, MSG_STALE_SCREEN, NEW_GAME, GameService,
 )
 from games.memory.storage import Storage
 
@@ -142,7 +142,7 @@ def test_each_player_gets_own_random_layout(service):
 def test_post_press_restores_existing_game(service):
     s = start(service, now=100)
     out = run(service.press_on_post(U1, CHAT, POST, 1, now=1000))  # приложение перезапустили
-    assert out.toast == MSG_RESTORED
+    assert out.toast == f"{LAYOUT[0]} + {LAYOUT[0]} — пара! Найдено 1 из 6"  # игра продолжается
     assert out.session.game.found == [0, 1]
     assert out.session.revision > s.revision  # старый экран больше не действует
 
@@ -201,17 +201,28 @@ def test_callback_data_fits_64_bytes(service):
         assert render.parse_post_data(data) is not None
 
 
-def test_repeated_post_presses_warn_about_old_client(service):
-    from games.memory.service import MSG_NOT_SHOWN
-    first = run(service.press_on_post(U1, CHAT, POST, 0, now=100))
-    assert not first.alert
-    second = run(service.press_on_post(U1, CHAT, POST, 1, now=103))
-    assert second.alert and second.toast == MSG_NOT_SHOWN
+def post(service, card, user=U1, now=None):
+    return run(service.press_on_post(user, CHAT, POST, card, now=now))
 
 
-def test_no_warning_if_screen_works_or_long_pause(service):
-    s = run(service.press_on_post(U1, CHAT, POST, 0, now=100)).session
-    s = tap(service, s, 4).session  # нажатие в личном экране — экран открылся
-    assert not run(service.press_on_post(U1, CHAT, POST, 5, now=105)).alert
-    assert not run(service.press_on_post(U2, CHAT, POST, 0, now=100)).alert
-    assert not run(service.press_on_post(U2, CHAT, POST, 1, now=300)).alert  # перезапуск приложения через минуты
+def test_post_press_describes_the_move(service):
+    """На iPhone личный экран не открывается: игра идёт по подсказкам на нажатия в посте."""
+    start(service, now=100)  # открыта карточка 0
+    pair = post(service, 1, now=101)
+    assert pair.toast == f"{LAYOUT[0]} + {LAYOUT[0]} — пара! Найдено 1 из 6" and not pair.alert
+    assert post(service, 4, now=102).toast == f"Карточка 5: {LAYOUT[4]}"
+    miss = post(service, 8, now=103)
+    assert miss.toast == f"{LAYOUT[4]} и {LAYOUT[8]} — не совпали, запоминайте"
+
+
+def test_post_presses_win_with_an_alert_and_never_blame_the_app(service):
+    start(service, now=100)
+    toasts = []
+    for card in range(1, CARDS):
+        out = post(service, card, now=100 + card)
+        toasts.append(out.toast or "")
+    assert out.session.game.status == WON and out.alert
+    assert out.toast.endswith("Все пары найдены! Ставьте 🔥 под постом")
+    assert not any("Обновите" in t for t in toasts)
+    again = post(service, 0, now=200)
+    assert again.alert and again.toast.endswith("Все пары найдены! Ставьте 🔥 под постом")

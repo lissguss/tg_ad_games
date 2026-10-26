@@ -6,18 +6,13 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from .logic import Game, generate_layout
+from .logic import CARDS, WON, Game, generate_layout
 from .storage import Key, Session, Storage
 
 MSG_STALE_SCREEN = "Экран обновился"
 MSG_RESTORED = "Ваша игра восстановлена"
 MSG_EXPIRED = "Прошлая игра устарела — начинаем новую"
-MSG_NOT_SHOWN = "Ваша версия Telegram не может показать игру. Обновите приложение и попробуйте снова."
-
-# Нажатия в общем посте подряд (без нажатий в личном экране) с интервалом не больше BLIND_WINDOW секунд.
-# Со второго такого нажатия считаем, что приложение игрока не показывает личный экран.
-BLIND_PRESSES = 2
-BLIND_WINDOW = 60
+MSG_WON_POST = "Все пары найдены! Ставьте 🔥 под постом"
 
 CARD, NEW_GAME = "c", "new"
 
@@ -33,12 +28,24 @@ class Outcome:
     alert: bool = False        # показать уведомление окном, а не всплывающей строкой
 
 
+def describe_move(g: Game, card: int, found_before: int) -> str:
+    """Что произошло после нажатия на карточку card — для всплывающей подсказки.
+    На iPhone Telegram не показывает личный экран, и игрок проходит игру по этим подсказкам."""
+    if g.status == WON:
+        return MSG_WON_POST
+    if len(g.found) > found_before:
+        return f"{g.layout[card]} + {g.layout[card]} — пара! Найдено {len(g.found) // 2} из {CARDS // 2}"
+    if g.mismatch:
+        a, b = g.opened
+        return f"{g.layout[a]} и {g.layout[b]} — не совпали, запоминайте"
+    return f"Карточка {card + 1}: {g.layout[card]}"
+
+
 class GameService:
     def __init__(self, storage: Storage, ttl_seconds: int):
         self.storage = storage
         self.ttl = ttl_seconds
         self._locks: dict[Key, asyncio.Lock] = {}
-        self._post_streak: dict[Key, tuple[int, float]] = {}  # (нажатий подряд, время последнего)
 
     def _lock(self, key: Key) -> asyncio.Lock:
         return self._locks.setdefault(key, asyncio.Lock())
@@ -70,31 +77,25 @@ class GameService:
         key = (user_id, chat_id, message_id)
         async with self._lock(key):
             s, created, expired = self._load_or_create(key)
-            toast, _ = s.game.press(card, time.time() if now is None else now)
-            if expired:
-                toast = MSG_EXPIRED
-            elif not created:
-                toast = toast or MSG_RESTORED
+            found_before = len(s.game.found)
+            toast, changed = s.game.press(card, time.time() if now is None else now)
+            # Ход описывается словами: у кого Telegram не показывает личный экран, играют по этим подсказкам
+            if s.game.status == WON and not changed:
+                move = MSG_WON_POST
+            else:
+                move = describe_move(s.game, card, found_before) if changed else toast
+            prefix = MSG_EXPIRED if expired else None  # подсказка и так показывает, что игра продолжается
             s.revision += 1  # экран будет новый — старые кнопки должны стать неактуальными
             self.storage.save(s)
-            out = Outcome(s, toast, changed=True)
-            if self._count_post_press(key, time.time() if now is None else now):
-                out.toast, out.alert = MSG_NOT_SHOWN, True
+            out = Outcome(s, ". ".join(filter(None, [prefix, move])) or None, changed=True,
+                          alert=s.game.status == WON)
             return await self._deliver(out, deliver)
-
-    def _count_post_press(self, key: Key, now: float) -> bool:
-        """True, если игрок жмёт в общий пост подряд — значит, личный экран у него не открывается."""
-        count, last = self._post_streak.get(key, (0, 0.0))
-        count = count + 1 if now - last <= BLIND_WINDOW else 1
-        self._post_streak[key] = (count, now)
-        return count >= BLIND_PRESSES
 
     async def press_on_screen(self, user_id: int, chat_id: int, message_id: int,
                               action: str, arg: int, revision: int,
                               deliver: Deliver = None, now: float | None = None) -> Outcome:
         """Нажатие в личном экране. Действие применяется, только если ревизия совпадает."""
         key = (user_id, chat_id, message_id)
-        self._post_streak.pop(key, None)  # личный экран у игрока открылся
         async with self._lock(key):
             out = self._screen(key, action, arg, revision, time.time() if now is None else now)
             return await self._deliver(out, deliver)
@@ -143,8 +144,4 @@ class GameService:
         for key, lock in list(self._locks.items()):
             if not lock.locked():
                 del self._locks[key]
-        cutoff = time.time() - BLIND_WINDOW
-        for key, (_, last) in list(self._post_streak.items()):
-            if last < cutoff:
-                del self._post_streak[key]
         return n

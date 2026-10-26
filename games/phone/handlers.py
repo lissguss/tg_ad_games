@@ -15,7 +15,7 @@ from .storage import Session
 log = logging.getLogger(__name__)
 router = Router()
 
-MSG_OLD_CLIENT = "Не удалось открыть игру. Обновите Telegram до последней версии и попробуйте ещё раз."
+MSG_FAILED = "Что-то пошло не так, попробуйте ещё раз"
 
 
 async def _with_retry(call):
@@ -87,22 +87,27 @@ async def on_callback(cq: CallbackQuery, bot: Bot, event_update: Update, phone_s
     post_id = msg.message_id
 
     async def deliver(s: Session):
-        sent = await _with_retry(lambda: bot.send_rich_message(
-            chat_id=chat_id,
-            rich_message=InputRichMessage(html=render.personal_screen(s)),
-            ephemeral_message_parameters=EphemeralMessageParameters(
-                receiver_user_id=user_id,
-                callback_query_id=cq.id,
-                replace_callback_query_message=True,
-            ),
-        ))
+        # Не получилось открыть личный экран — не страшно: ход уже сделан, подсказка уйдёт в ответе
+        try:
+            sent = await _with_retry(lambda: bot.send_rich_message(
+                chat_id=chat_id,
+                rich_message=InputRichMessage(html=render.personal_screen(s)),
+                ephemeral_message_parameters=EphemeralMessageParameters(
+                    receiver_user_id=user_id,
+                    callback_query_id=cq.id,
+                    replace_callback_query_message=True,
+                ),
+            ))
+        except Exception:
+            log.exception("не удалось открыть личный экран")
+            return
         service.remember_ephemeral(s, sent.ephemeral_message_id)
 
     try:
         out = await service.press_on_post(user_id, chat_id, post_id, action, deliver)
     except Exception:
-        log.exception("не удалось открыть личный экран")
-        await cq.answer(MSG_OLD_CLIENT, show_alert=True)
+        log.exception("ошибка при нажатии в посте")
+        await cq.answer(MSG_FAILED, show_alert=True)
         return
     _log("post", user_id, post_id, f"phone:{action}", out)
     await cq.answer(out.toast, show_alert=out.alert)
