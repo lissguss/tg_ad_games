@@ -152,7 +152,7 @@ def test_loss_counted(service):
 def test_post_text_and_keypad():
     html = render.public_post()
     # два абзаца до игры — один блок, между ними пустая строка
-    assert html.startswith('<p>Нажали на <a href="https://t.me/alfadigital_jobs/6597">стикер</a>')
+    assert html.startswith('<p><a href="https://t.me/alfadigital_jobs/6597">Нажали на стикер</a>')
     assert "дату тусовки.<br><br>📆 Кто угадал" in html
     assert html.count("<p>") == 3  # текст, «Попытка #1», подпись
     assert "<b>Попытка #1</b>" in html
