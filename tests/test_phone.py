@@ -198,10 +198,12 @@ def test_loss_counted(service):
 
 def test_post_text_and_keypad():
     html = render.public_post()
-    # два абзаца до игры — один блок, между ними пустая строка
-    assert html.startswith("<p>После планёрки специалист по безопасной разработке")
-    assert "вся команда».<br><br>Если вы всё-таки" in html
+    # три абзаца до игры — один блок, между ними пустая строка
+    assert html.startswith("<p>После планёрки наш эксперт по безопасной разработке")
+    assert "подсказкой: <tg-spoiler>«Пароль — день," in html
+    assert "в бигтехе»</tg-spoiler>.<br><br>Если вы всё-таки" in html
     assert '<a href="https://t.me/alfadigital_jobs/6597">нажали на стикер</a>' in html
+    assert "дату 🍸<br><br>Скоро всё расскажем." in html
     assert html.count("<p>") == 3  # текст, «Попытка #1», подпись
     assert "<b>Попытка #1</b>" in html
     assert html.endswith("<p>@alfadigital_jobs</p>")
