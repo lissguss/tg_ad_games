@@ -4,12 +4,11 @@
 строка [игра] — место для экрана и клавиатуры.
 
 callback_data (все начинаются с phone:):
-  общий пост    phone:<цифра>, phone:del, phone:ok  ход сразу применяется, ответ — всплывающая подсказка
+  общий пост    phone:<цифра>, phone:del, phone:ok  любая кнопка открывает игру в чате с ботом
   личный экран  phone:<действие>:<пост>:<ревизия>   например phone:1:2:12, phone:new:2:20
   действие: цифра 0–9, del, ok, new («Играть снова»)
   phone:-       клетки строки ввода и попыток: в посте открывает игру, в личном экране ничего не делает
-  «🎮 Играть в боте» — ссылка t.me/<бот>?start=phone: та же игра экраном в чате с ботом,
-                где пост = 0 (CHAT_GAME); на iPhone так видно само поле
+  игра в чате с ботом: /start phone, там пост = 0 (CHAT_GAME), кнопки как в личном экране
                 (это обычные кнопки, а не disabled, чтобы цифры не были бледными)
 Пароля нет ни в callback_data, ни в тексте экрана.
 """
@@ -38,7 +37,6 @@ WIN_LINE = "<b>Телефон разблокирован, запоминайте
 LOSE_LINE = "🔒 <b>Попытки закончились.</b> Попробуйте ещё раз."
 PLAY_AGAIN = "Играть снова"
 START = "phone"  # /start phone — игра в чате с ботом
-BOT_BUTTON = "🎮 Играть в боте"
 DELETE_LABEL = "⌫ Удалить"
 CHECK_LABEL = "Проверить"
 
@@ -69,8 +67,8 @@ def _display(current: str) -> str:
 
 def _keypad(data, current: str, always_active: bool = False) -> str:
     """Раскладка как у телефона: * и # неактивны. «Удалить» активна, когда есть что удалять,
-    «Проверить» — когда набраны все цифры. В общем посте обе активны всегда: на iPhone
-    игра идёт по кнопкам поста (личный экран там не открывается). data(action) -> callback_data."""
+    «Проверить» — когда набраны все цифры. В общем посте активны всегда: любая кнопка поста
+    открывает игру в чате с ботом. data(action) -> callback_data."""
     rows = [_row(*(_button(d, data(d)) for d in line)) for line in KEYPAD]
     rows.append(_row(_disabled("*"), _button("0", data("0")), _disabled("#")))
     can_delete = always_active or bool(current)
@@ -116,15 +114,8 @@ def _playing(game: Game, data, always_active: bool = False) -> str:
             + _history(game) + _display(game.current) + _keypad(data, game.current, always_active))
 
 
-def _bot_button(bot_username: str) -> str:
-    """Ссылка в чат с ботом: на iPhone личный экран в посте не открывается, а там игра видна целиком."""
-    url = f"https://t.me/{bot_username}?start={START}"
-    return _row(f'<tg-button type="url" url="{url}">{BOT_BUTTON}</tg-button>')
-
-
-def public_post(bot_username: str) -> str:
-    game = _playing(Game(), lambda action: f"{PREFIX}{action}", always_active=True)
-    return _wrap(game + _bot_button(bot_username))
+def public_post() -> str:
+    return _wrap(_playing(Game(), lambda action: f"{PREFIX}{action}", always_active=True))
 
 
 def personal_screen(s: Session) -> str:

@@ -1,4 +1,8 @@
-"""Обработка нажатий: сессии, ревизии, блокировки. Без вызовов Telegram — их делает handlers.py."""
+"""Обработка нажатий: сессии, ревизии, блокировки. Без вызовов Telegram — их делает handlers.py.
+
+Играют в чате с ботом: любая кнопка поста открывает бота (/start phone), игра там — одно
+сообщение, которое перерисовывается при каждом нажатии. Личные экраны в посте (они ещё живы
+у тех, кто открыл их раньше) обрабатываются так же."""
 from __future__ import annotations
 
 import asyncio
@@ -6,30 +10,17 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from .logic import CODE_LENGTH, HIT, LOST, MAX_ATTEMPTS, NEAR, WON, Game
+from .logic import Game
 from .storage import Key, Session, Storage
 
 MSG_STALE_SCREEN = "Экран обновился"
-MSG_RESTORED = "Ваша игра восстановлена"
 MSG_EXPIRED = "Прошлая игра устарела — начинаем новую"
-MSG_ENTER_FIRST = "Сначала наберите цифры"
-MSG_NEW_GAME = "Новая игра"
 
-# Подсказки при нажатиях в общем посте. На iPhone Telegram не показывает личный экран,
-# и игрок проходит игру по ним: что набрано, как прошла проверка, сколько осталось попыток.
-POST_WON = "🎉 Телефон разблокирован, запоминайте дату 📆"
-POST_LOST = "🔒 Попытки закончились. Нажмите любую цифру — начнём заново."
-POST_LEGEND = "🟩 на месте · 🟦 есть, но не там"
-MARK_EMOJI = {HIT: "🟩", NEAR: "🟦"}
-MISS_EMOJI = "⬜"
-HIDDEN = "•"
-ALERT_MAX = 200  # предел Telegram для answerCallbackQuery
-
-CHAT_GAME = 0  # message_id игры в чате с ботом («Играть в боте»): поста у неё нет
+CHAT_GAME = 0  # message_id игры в чате с ботом: поста у неё нет
 
 DIGITS = "0123456789"
 DELETE, CHECK, NEW_GAME = "del", "ok", "new"
-VIEW = "-"  # клетка экрана или попытки: только открыть игру, ничего не менять
+VIEW = "-"  # клетка экрана или попытки: ничего не меняет
 ACTIONS = (*DIGITS, DELETE, CHECK, NEW_GAME, VIEW)
 
 # Показ экрана в Telegram. Вызывается под блокировкой сессии, чтобы экраны не обгоняли друг друга.
@@ -41,40 +32,6 @@ class Outcome:
     session: Session
     toast: str | None = None   # всплывающее уведомление (answerCallbackQuery)
     changed: bool = False      # изменилось ли состояние (нужна перерисовка)
-    alert: bool = False        # показать уведомление окном, а не всплывающей строкой
-
-
-def typed(game: Game) -> str:
-    """Набранные цифры, на пустых местах точки: «1 7 • • • •»."""
-    return " ".join(game.current[i] if i < len(game.current) else HIDDEN for i in range(CODE_LENGTH))
-
-
-def _history_lines(game: Game) -> list[str]:
-    return [a.guess + " " + "".join(MARK_EMOJI.get(m, MISS_EMOJI) for m in a.marks)
-            for a in game.attempts]
-
-
-def _fit(head: str, lines: list[str], tail: list[str]) -> str:
-    """Окно уведомления не длиннее ALERT_MAX: если не помещается, старые попытки отбрасываются."""
-    while lines:
-        text = "\n".join([head, *lines, *tail])
-        if len(text) <= ALERT_MAX:
-            return text
-        lines = lines[1:]
-    return "\n".join([head, *tail])
-
-
-def describe(game: Game, checked: bool) -> str:
-    """Что показать игроку после нажатия в посте."""
-    if game.status == WON:
-        return _fit(POST_WON, _history_lines(game), [])
-    if game.status == LOST:
-        return _fit(POST_LOST, _history_lines(game), [])
-    if checked:
-        left = MAX_ATTEMPTS - len(game.attempts)
-        head = f"Попытка {len(game.attempts)} из {MAX_ATTEMPTS}: не подошло"
-        return _fit(head, _history_lines(game), [POST_LEGEND, f"Осталось попыток: {left}"])
-    return f"Попытка {game.attempt_number} из {MAX_ATTEMPTS}. Набрано: {typed(game)}"
 
 
 class GameService:
@@ -114,29 +71,22 @@ class GameService:
             await deliver(out.session)
         return out
 
-    async def press_on_post(self, user_id: int, chat_id: int, message_id: int, action: str,
-                            deliver: Deliver = None) -> Outcome:
-        """Нажатие в общем посте: тот же ход, что в личном экране, плюс подсказка словами.
-        Личный экран открывается там, где Telegram его показывает (Android, компьютер)."""
+    async def open(self, user_id: int, chat_id: int, message_id: int) -> Session:
+        """Показать игру заново (новым сообщением): та же партия, старые экраны устаревают."""
         key = (user_id, chat_id, message_id)
         async with self._lock(key):
-            s, created, expired = self._load_or_create(key)
-            prefix = MSG_EXPIRED if expired else None
-            if s.game.status == LOST and action in DIGITS:  # «Играть снова» в посте нет
-                s = Session(*key, Game(), revision=s.revision, ephemeral_id=s.ephemeral_id)
-                prefix = MSG_NEW_GAME
-            error = self._apply(s, action) if not s.game.finished else None
-            checked = action == CHECK and error is None
-            move = f"{error}. Набрано: {typed(s.game)}" if error else describe(s.game, checked)
-            s.revision += 1  # экран будет новый — старые кнопки должны стать неактуальными
+            s, _, _ = self._load_or_create(key)
+            s.revision += 1
             self.storage.save(s)
-            toast = ". ".join(filter(None, [prefix, move]))
-            out = Outcome(s, toast, changed=True, alert=checked or s.game.finished)
-            return await self._deliver(out, deliver)
+            return s
+
+    async def open_in_chat(self, user_id: int, chat_id: int) -> Session:
+        """/start phone: игра в чате с ботом."""
+        return await self.open(user_id, chat_id, CHAT_GAME)
 
     async def press_on_screen(self, user_id: int, chat_id: int, message_id: int,
                               action: str, revision: int, deliver: Deliver = None) -> Outcome:
-        """Нажатие в личном экране. Действие применяется, только если ревизия совпадает."""
+        """Нажатие на экране игры. Действие применяется, только если ревизия совпадает."""
         key = (user_id, chat_id, message_id)
         async with self._lock(key):
             return await self._deliver(self._screen(key, action, revision), deliver)
@@ -160,17 +110,8 @@ class GameService:
         self.storage.save(s)
         return Outcome(s, None, changed=True)
 
-    async def open_in_chat(self, user_id: int, chat_id: int) -> Session:
-        """/start из кнопки «Играть в боте»: игра экраном в чате с ботом. Там поле видно на любом
-        устройстве, в том числе на iPhone, где личный экран в посте не открывается."""
-        key = (user_id, chat_id, CHAT_GAME)
-        async with self._lock(key):
-            s, _, _ = self._load_or_create(key)
-            s.revision += 1  # экран будет новым сообщением — старые в чате устаревают
-            self.storage.save(s)
-            return s
-
     def remember_ephemeral(self, s: Session, ephemeral_id: int) -> None:
+        """id сообщения с экраном: личного экрана в посте или игры в чате с ботом."""
         s.ephemeral_id = ephemeral_id
         self.storage.save(s)
 

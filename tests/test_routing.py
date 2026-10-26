@@ -74,37 +74,44 @@ def test_memory_patterns_do_not_match_phone():
         assert re.match(memory.render.CALLBACK_RE, data)
 
 
-def test_phone_press_does_not_touch_memory(env):
+def test_phone_post_press_opens_the_bot_and_does_not_touch_memory(env):
     press, ms, ps = env
-    names, _ = press("phone:1", PHONE_POST)
-    assert names == ["SendRichMessage", "AnswerCallbackQuery"]
-    assert ps.storage.load(USER, CHAT, PHONE_POST).game.current == "1"
+    for data in ("phone:1", "phone:del", "phone:ok", "phone:-"):
+        names, calls = press(data, PHONE_POST)
+        assert names == ["AnswerCallbackQuery"]
+        assert calls[0].url == "https://t.me/test_bot?start=phone"
+    assert ps.storage.db.execute("SELECT COUNT(*) FROM phone_sessions").fetchone()[0] == 0
     assert ms.storage.db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
     assert ms.storage.db.execute("SELECT COUNT(*) FROM processed_updates").fetchone()[0] == 0
 
 
-def test_memory_press_does_not_touch_phone(env):
+def test_memory_post_press_opens_the_bot_and_does_not_touch_phone(env):
     press, ms, ps = env
-    names, _ = press("p:3", MEMORY_POST)
-    assert names == ["SendRichMessage", "AnswerCallbackQuery"]
-    assert ms.storage.load(USER, CHAT, MEMORY_POST).game.opened == [3]
+    names, calls = press("p:3", MEMORY_POST)
+    assert names == ["AnswerCallbackQuery"]
+    assert calls[0].url == "https://t.me/test_bot?start=memory"
+    assert ms.storage.db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
     assert ps.storage.db.execute("SELECT COUNT(*) FROM phone_sessions").fetchone()[0] == 0
     assert ps.storage.db.execute("SELECT COUNT(*) FROM phone_processed_updates").fetchone()[0] == 0
 
 
-def test_games_played_in_turns(env):
+def opened_screen(service, post_id, ephemeral_id):
+    """Личный экран, открытый в посте раньше (до перехода игры в чат с ботом)."""
+    s = asyncio.run(service.open(USER, CHAT, post_id))
+    service.remember_ephemeral(s, ephemeral_id)
+    return s
+
+
+def test_old_personal_screens_keep_working_in_turns(env):
     press, ms, ps = env
-    press("p:0", MEMORY_POST)
-    press("phone:1", PHONE_POST)
-    ph = ps.storage.load(USER, CHAT, PHONE_POST)
-    m = ms.storage.load(USER, CHAT, MEMORY_POST)
-    names, _ = press(f"phone:7:{PHONE_POST}:{ph.revision}", PHONE_POST, ephemeral_id=ph.ephemeral_id)
+    ph = opened_screen(ps, PHONE_POST, 901)
+    m = opened_screen(ms, MEMORY_POST, 902)
+    names, _ = press(f"phone:7:{PHONE_POST}:{ph.revision}", PHONE_POST, ephemeral_id=901)
     assert names == ["EditEphemeralMessageText", "AnswerCallbackQuery"]
-    names, _ = press(f"c:1:{MEMORY_POST}:{m.revision}", MEMORY_POST, ephemeral_id=m.ephemeral_id)
+    names, _ = press(f"c:1:{MEMORY_POST}:{m.revision}", MEMORY_POST, ephemeral_id=902)
     assert names == ["EditEphemeralMessageText", "AnswerCallbackQuery"]
-    assert ps.storage.load(USER, CHAT, PHONE_POST).game.current == "17"
-    g = ms.storage.load(USER, CHAT, MEMORY_POST).game
-    assert sorted(g.opened + g.found) == [0, 1]  # пара открыта (совпала или ждёт переворота)
+    assert ps.storage.load(USER, CHAT, PHONE_POST).game.current == "7"
+    assert ms.storage.load(USER, CHAT, MEMORY_POST).game.opened == [1]
     # ход в мемори не сдвинул ревизию телефона и наоборот
     assert ps.storage.load(USER, CHAT, PHONE_POST).revision == ph.revision + 1
 
@@ -147,7 +154,6 @@ def test_admin_publishes_both_games_to_channel(command):
         post, reply = send(cmd)
         assert type(post).__name__ == "SendRichMessage" and post.chat_id == CHAT
         assert mark in post.rich_message.html
-        assert "https://t.me/test_bot?start=" in post.rich_message.html  # кнопка «Играть в боте»
         assert "опубликована" in reply.text
     assert ps.storage.stats()["posts"] == 1
 
@@ -179,8 +185,7 @@ def test_menu_only_for_admins():
 
 def test_view_cell_on_screen_does_nothing(env):
     press, ms, ps = env
-    press("phone:-", PHONE_POST)  # клетка в посте открывает игру
-    s = ps.storage.load(USER, CHAT, PHONE_POST)
-    names, _ = press("phone:-", PHONE_POST, ephemeral_id=s.ephemeral_id)
+    s = opened_screen(ps, PHONE_POST, 903)
+    names, _ = press("phone:-", PHONE_POST, ephemeral_id=903)
     assert names == ["AnswerCallbackQuery"]
     assert ps.storage.load(USER, CHAT, PHONE_POST).revision == s.revision
