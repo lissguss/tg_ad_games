@@ -8,7 +8,7 @@ from games.phone.logic import (
     HIT, LOST, MAX_ATTEMPTS, MISS, MSG_FINISHED, MSG_FULL, MSG_NEED_ALL, NEAR, PASSWORD, PLAYING,
     WON, Game, score,
 )
-from games.phone.service import MSG_ENTER_FIRST, MSG_RESTORED, MSG_STALE_SCREEN, GameService
+from games.phone.service import MSG_STALE_SCREEN, GameService
 from games.phone.storage import Storage
 
 U1, U2, CHAT, POST = 111, 222, -100, 7
@@ -101,19 +101,66 @@ def test_loss_after_five_attempts_and_input_blocked():
 
 # --- сервис ---
 
+def post(service, action, user=U1):
+    return run(service.press_on_post(user, CHAT, POST, action))
+
+
 def test_first_digit_on_post_starts_game(service):
-    out = run(service.press_on_post(U1, CHAT, POST, "1"))
-    assert out.session.game.current == "1" and out.toast is None
+    out = post(service, "1")
+    assert out.session.game.current == "1"
+    assert out.toast == "Попытка 1 из 5. Набрано: 1 • • • • •" and not out.alert
 
 
 def test_delete_on_post_before_game(service):
-    assert run(service.press_on_post(U1, CHAT, POST, "del")).toast == MSG_ENTER_FIRST
+    assert post(service, "del").toast == "Нечего удалять. Набрано: • • • • • •"
 
 
-def test_post_press_restores_game(service):
-    run(service.press_on_post(U1, CHAT, POST, "1", now=0))
-    out = run(service.press_on_post(U1, CHAT, POST, "ok", now=1000))
-    assert out.toast == MSG_RESTORED and out.session.game.current == "1"
+def test_post_press_continues_the_game(service):
+    post(service, "1")
+    post(service, "7")
+    assert post(service, "del").toast == "Попытка 1 из 5. Набрано: 1 • • • • •"
+    out = post(service, "ok")
+    assert out.toast == "Введите 6 цифр. Набрано: 1 • • • • •" and out.session.game.current == "1"
+
+
+def test_whole_game_is_playable_from_the_post(service):
+    """iPhone не показывает личный экран: цифры, «Удалить» и «Проверить» работают кнопками поста."""
+    for d in WRONG:
+        post(service, d)
+    checked = post(service, "ok")
+    assert checked.alert
+    assert checked.toast.splitlines() == [
+        "Попытка 1 из 5: не подошло",
+        "234567 🟦⬜⬜⬜🟦🟦",
+        "🟩 на месте · 🟦 есть, но не там",
+        "Осталось попыток: 4",
+    ]
+    for d in PASSWORD:
+        post(service, d)
+    won = post(service, "ok")
+    assert won.session.game.status == WON and won.alert
+    assert won.toast.splitlines()[0] == "🎉 Телефон разблокирован, запоминайте дату 📆"
+    assert post(service, "5").session.game.status == WON  # после победы цифры не вводятся
+    assert service.storage.stats()["wins"] == 1
+
+
+def test_lost_game_restarts_from_the_post(service):
+    for _ in range(MAX_ATTEMPTS):
+        for d in WRONG:
+            post(service, d)
+        last = post(service, "ok")
+    assert last.session.game.status == LOST and last.alert
+    assert last.toast.startswith("🔒 Попытки закончились")
+    assert PASSWORD not in last.toast
+    assert len(last.toast) <= 200
+    fresh = post(service, "1")
+    assert fresh.session.game.status == PLAYING and fresh.session.game.attempts == []
+    assert fresh.toast == "Новая игра. Попытка 1 из 5. Набрано: 1 • • • • •"
+
+
+def test_post_presses_never_blame_the_app(service):
+    toasts = [post(service, a).toast for a in ["1", "-", "del", "ok", "2", "2"]]
+    assert not any("Обновите" in t for t in toasts)
 
 
 def test_stale_revision_not_applied(service):
@@ -160,11 +207,13 @@ def test_post_text_and_keypad():
     assert html.endswith("<p>@alfadigital_jobs</p>")
     assert render.GAME_MARK not in html
     datas = re.findall(r'data="([^"]+)"', html)
-    # «Удалить» и «Проверить» в пустом посте неактивны, * и # неактивны всегда
-    assert sorted(set(datas)) == sorted([f"phone:{d}" for d in "0123456789"] + ["phone:-"])
+    # «Удалить» и «Проверить» в посте активны (на iPhone игра идёт по кнопкам поста), * и # неактивны
+    assert sorted(set(datas)) == sorted(
+        [f"phone:{d}" for d in "0123456789"] + ["phone:-", "phone:del", "phone:ok"]
+    )
     assert datas.count("phone:-") == 6  # строка ввода — обычные кнопки, не бледные
-    assert '<tg-button type="disabled">⌫ Удалить</tg-button>' in html
-    assert '<tg-button type="disabled">Проверить</tg-button>' in html
+    assert '<tg-button type="disabled">*</tg-button>' in html
+    assert '<tg-button type="disabled">#</tg-button>' in html
     assert "style=" not in html  # клавиатура без цвета
     assert '<tg-button type="disabled">·</tg-button>' not in html
 
@@ -215,4 +264,5 @@ def test_attempt_rows_colored_keypad_not(service):
 
 def test_view_cell_on_post_opens_game_without_input(service):
     out = run(service.press_on_post(U1, CHAT, POST, "-"))
-    assert out.toast is None and out.session.game.current == "" and out.changed
+    assert out.toast == "Попытка 1 из 5. Набрано: • • • • • •"
+    assert out.session.game.current == "" and out.changed

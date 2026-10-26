@@ -4,7 +4,7 @@
 строка [игра] — место для экрана и клавиатуры.
 
 callback_data (все начинаются с phone:):
-  общий пост    phone:<цифра>                       например phone:1 («Удалить» и «Проверить» здесь неактивны)
+  общий пост    phone:<цифра>, phone:del, phone:ok  ход сразу применяется, ответ — всплывающая подсказка
   личный экран  phone:<действие>:<пост>:<ревизия>   например phone:1:2:12, phone:new:2:20
   действие: цифра 0–9, del, ok, new («Играть снова»)
   phone:-       клетки строки ввода и попыток: в посте открывает игру, в личном экране ничего не делает
@@ -63,13 +63,16 @@ def _display(current: str) -> str:
     return _row(*(_cell(current[i] if i < len(current) else EMPTY) for i in range(CODE_LENGTH)))
 
 
-def _keypad(data, current: str) -> str:
+def _keypad(data, current: str, always_active: bool = False) -> str:
     """Раскладка как у телефона: * и # неактивны. «Удалить» активна, когда есть что удалять,
-    «Проверить» — когда набраны все цифры. data(action) -> callback_data."""
+    «Проверить» — когда набраны все цифры. В общем посте обе активны всегда: на iPhone
+    игра идёт по кнопкам поста (личный экран там не открывается). data(action) -> callback_data."""
     rows = [_row(*(_button(d, data(d)) for d in line)) for line in KEYPAD]
     rows.append(_row(_disabled("*"), _button("0", data("0")), _disabled("#")))
-    delete = _button(DELETE_LABEL, data(DELETE)) if current else _disabled(DELETE_LABEL)
-    check = _button(CHECK_LABEL, data(CHECK)) if len(current) == CODE_LENGTH else _disabled(CHECK_LABEL)
+    can_delete = always_active or bool(current)
+    can_check = always_active or len(current) == CODE_LENGTH
+    delete = _button(DELETE_LABEL, data(DELETE)) if can_delete else _disabled(DELETE_LABEL)
+    check = _button(CHECK_LABEL, data(CHECK)) if can_check else _disabled(CHECK_LABEL)
     rows.append(_row(delete, check))
     return "".join(rows)
 
@@ -104,13 +107,13 @@ def _wrap(game_block: str) -> str:
     return "".join(parts)
 
 
-def _playing(game: Game, data) -> str:
+def _playing(game: Game, data, always_active: bool = False) -> str:
     return (f"<p>{ATTEMPT_LINE.format(n=game.attempt_number)}</p>"
-            + _history(game) + _display(game.current) + _keypad(data, game.current))
+            + _history(game) + _display(game.current) + _keypad(data, game.current, always_active))
 
 
 def public_post() -> str:
-    return _wrap(_playing(Game(), lambda action: f"{PREFIX}{action}"))
+    return _wrap(_playing(Game(), lambda action: f"{PREFIX}{action}", always_active=True))
 
 
 def personal_screen(s: Session) -> str:
