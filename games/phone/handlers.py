@@ -34,6 +34,40 @@ def _log(where: str, user_id: int, post_id: int, action: str, out: Outcome) -> N
              g.status, len(g.attempts), out.toast or "")
 
 
+def _in_bot_chat(s: Session) -> bool:
+    """Игра в чате с ботом («Играть в боте»): у личных чатов id положительный, у каналов — нет."""
+    return s.chat_id > 0
+
+
+async def _edit_screen(bot: Bot, s: Session, screen_id: int) -> None:
+    """Перерисовать экран: в чате с ботом это обычное сообщение, в посте — личный экран."""
+    html = InputRichMessage(html=render.personal_screen(s))
+
+    async def call():
+        if _in_bot_chat(s):
+            return await bot.edit_message_text(chat_id=s.chat_id, message_id=screen_id, rich_message=html)
+        return await bot.edit_ephemeral_message_text(
+            chat_id=s.chat_id, receiver_user_id=s.user_id, ephemeral_message_id=screen_id,
+            rich_message=html,
+        )
+
+    try:
+        await _with_retry(call)
+    except TelegramBadRequest as e:
+        if "not modified" not in str(e):
+            raise
+
+
+async def open_in_bot_chat(bot: Bot, service: GameService, user_id: int, chat_id: int) -> None:
+    """Ответ на /start phone: игра отдельным сообщением в чате с ботом."""
+    s = await service.open_in_chat(user_id, chat_id)
+    sent = await _with_retry(lambda: bot.send_rich_message(
+        chat_id=chat_id, rich_message=InputRichMessage(html=render.personal_screen(s)),
+    ))
+    service.remember_ephemeral(s, sent.message_id)
+    log.info("bot chat user=%s opened, attempts=%s", user_id, len(s.game.attempts))
+
+
 @router.callback_query(F.data.startswith(render.PREFIX))
 async def on_callback(cq: CallbackQuery, bot: Bot, event_update: Update, phone_service: GameService):
     service = phone_service
@@ -45,9 +79,10 @@ async def on_callback(cq: CallbackQuery, bot: Bot, event_update: Update, phone_s
         return
     user_id, chat_id = cq.from_user.id, msg.chat.id
     ephemeral_id = getattr(msg, "ephemeral_message_id", None)
+    screen_id = ephemeral_id or (msg.message_id if msg.chat.type == "private" else None)
 
-    if ephemeral_id:
-        # нажатие в личном экране
+    if screen_id:
+        # нажатие в личном экране или в игре в чате с ботом
         if cq.data == render.VIEW_DATA:
             await cq.answer()  # клетка ввода или попытки — ничего не делаем
             return
@@ -58,16 +93,9 @@ async def on_callback(cq: CallbackQuery, bot: Bot, event_update: Update, phone_s
         action, post_id, revision = parsed
 
         async def deliver(s: Session):
-            try:
-                await _with_retry(lambda: bot.edit_ephemeral_message_text(
-                    chat_id=chat_id, receiver_user_id=user_id, ephemeral_message_id=ephemeral_id,
-                    rich_message=InputRichMessage(html=render.personal_screen(s)),
-                ))
-            except TelegramBadRequest as e:
-                if "not modified" not in str(e):
-                    raise
-            if s.ephemeral_id != ephemeral_id:
-                service.remember_ephemeral(s, ephemeral_id)
+            await _edit_screen(bot, s, screen_id)
+            if s.ephemeral_id != screen_id:
+                service.remember_ephemeral(s, screen_id)
 
         try:
             out = await service.press_on_screen(user_id, chat_id, post_id, action, revision, deliver)

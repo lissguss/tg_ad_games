@@ -15,6 +15,7 @@ MSG_EXPIRED = "Прошлая игра устарела — начинаем н�
 MSG_WON_POST = "Все пары найдены! Ставьте 🔥 под постом"
 
 CARD, NEW_GAME = "c", "new"
+CHAT_GAME = 0  # message_id игры в чате с ботом («Играть в боте»): поста у неё нет
 
 # Показ экрана в Telegram. Вызывается под блокировкой сессии, чтобы экраны не обгоняли друг друга.
 Deliver = Callable[[Session], Awaitable[None]] | None
@@ -134,6 +135,16 @@ class GameService:
             s.revision += 1
             self.storage.save(s)
             return await self._deliver(Outcome(s, None, changed=True), deliver)
+
+    async def open_in_chat(self, user_id: int, chat_id: int) -> Session:
+        """/start из кнопки «Играть в боте»: игра экраном в чате с ботом. Там поле видно на любом
+        устройстве, в том числе на iPhone, где личный экран в посте не открывается."""
+        key = (user_id, chat_id, CHAT_GAME)
+        async with self._lock(key):
+            s, _, _ = self._load_or_create(key)
+            s.revision += 1  # экран будет новым сообщением — старые в чате устаревают
+            self.storage.save(s)
+            return s
 
     def remember_ephemeral(self, s: Session, ephemeral_id: int) -> None:
         s.ephemeral_id = ephemeral_id

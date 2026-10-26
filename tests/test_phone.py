@@ -197,7 +197,7 @@ def test_loss_counted(service):
 # --- рендер ---
 
 def test_post_text_and_keypad():
-    html = render.public_post()
+    html = render.public_post("test_bot")
     # два абзаца до игры — один блок, между ними пустая строка
     assert html.startswith("<p>После планёрки специалист по безопасной разработке")
     assert "вся команда».<br><br>Если вы всё-таки" in html

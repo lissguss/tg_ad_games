@@ -1,11 +1,12 @@
 """Команды в личке с ботом: /start, /games, /stats и публикация игр (только для ADMIN_IDS).
-Те же команды показываются админам в кнопке «Меню» (setMyCommands)."""
+Те же команды показываются админам в кнопке «Меню» (setMyCommands).
+/start <игра> (кнопка «🎮 Играть в боте» под постом) открывает игру в чате с ботом — для всех."""
 from __future__ import annotations
 
 import logging
 
 from aiogram import Bot, F, Router
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import BotCommand, BotCommandScopeChat, InputRichMessage, Message
 
@@ -51,8 +52,17 @@ def games_text() -> str:
     return "\n".join(lines)
 
 
+def _game_by_start(payload: str | None):
+    return next(((g, name) for g, name in GAMES if g.START == payload), None)
+
+
 @router.message(CommandStart())
-async def on_start(message: Message, config: Config):
+async def on_start(message: Message, bot: Bot, config: Config, command: CommandObject, **data):
+    found = _game_by_start(command.args)
+    if found is not None and message.from_user is not None:
+        game, service_name = found
+        await game.open_in_bot_chat(bot, data[service_name], message.from_user.id, message.chat.id)
+        return
     if _is_admin(message, config):
         await message.answer(games_text())
     else:
@@ -77,8 +87,9 @@ def _publisher(game, service_name: str):
     async def on_publish(message: Message, bot: Bot, config: Config, **data):
         if not _is_admin(message, config):
             return
+        me = await bot.me()
         sent = await bot.send_rich_message(
-            chat_id=config.channel_id, rich_message=InputRichMessage(html=game.post_html()),
+            chat_id=config.channel_id, rich_message=InputRichMessage(html=game.post_html(me.username)),
         )
         game.on_published(data[service_name], config.channel_id, sent.message_id)
         log.info("%s: опубликован пост %s", game.COMMAND, sent.message_id)
