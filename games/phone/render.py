@@ -8,6 +8,8 @@ callback_data (все начинаются с phone:):
   личный экран  phone:<действие>:<пост>:<ревизия>   например phone:1:2:12, phone:new:2:20
   действие: цифра 0–9, del, ok, new («Играть снова»)
   phone:-       клетки строки ввода и попыток: в посте открывает игру, в личном экране ничего не делает
+  «🎮 Играть в боте» — ссылка t.me/<бот>?start=phone: та же игра экраном в чате с ботом,
+                где пост = 0 (CHAT_GAME); на iPhone так видно само поле
                 (это обычные кнопки, а не disabled, чтобы цифры не были бледными)
 Пароля нет ни в callback_data, ни в тексте экрана.
 """
@@ -35,6 +37,8 @@ ATTEMPT_LINE = "<b>Попытка #{n}</b>"
 WIN_LINE = "<b>Телефон разблокирован, запоминайте дату 📆</b>"
 LOSE_LINE = "🔒 <b>Попытки закончились.</b> Попробуйте ещё раз."
 PLAY_AGAIN = "Играть снова"
+START = "phone"  # /start phone — игра в чате с ботом
+BOT_BUTTON = "🎮 Играть в боте"
 DELETE_LABEL = "⌫ Удалить"
 CHECK_LABEL = "Проверить"
 
@@ -112,8 +116,15 @@ def _playing(game: Game, data, always_active: bool = False) -> str:
             + _history(game) + _display(game.current) + _keypad(data, game.current, always_active))
 
 
-def public_post() -> str:
-    return _wrap(_playing(Game(), lambda action: f"{PREFIX}{action}", always_active=True))
+def _bot_button(bot_username: str) -> str:
+    """Ссылка в чат с ботом: на iPhone личный экран в посте не открывается, а там игра видна целиком."""
+    url = f"https://t.me/{bot_username}?start={START}"
+    return _row(f'<tg-button type="url" url="{url}">{BOT_BUTTON}</tg-button>')
+
+
+def public_post(bot_username: str) -> str:
+    game = _playing(Game(), lambda action: f"{PREFIX}{action}", always_active=True)
+    return _wrap(game + _bot_button(bot_username))
 
 
 def personal_screen(s: Session) -> str:

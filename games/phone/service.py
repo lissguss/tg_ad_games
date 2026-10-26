@@ -25,6 +25,8 @@ MISS_EMOJI = "⬜"
 HIDDEN = "•"
 ALERT_MAX = 200  # предел Telegram для answerCallbackQuery
 
+CHAT_GAME = 0  # message_id игры в чате с ботом («Играть в боте»): поста у неё нет
+
 DIGITS = "0123456789"
 DELETE, CHECK, NEW_GAME = "del", "ok", "new"
 VIEW = "-"  # клетка экрана или попытки: только открыть игру, ничего не менять
@@ -157,6 +159,16 @@ class GameService:
         s.revision += 1
         self.storage.save(s)
         return Outcome(s, None, changed=True)
+
+    async def open_in_chat(self, user_id: int, chat_id: int) -> Session:
+        """/start из кнопки «Играть в боте»: игра экраном в чате с ботом. Там поле видно на любом
+        устройстве, в том числе на iPhone, где личный экран в посте не открывается."""
+        key = (user_id, chat_id, CHAT_GAME)
+        async with self._lock(key):
+            s, _, _ = self._load_or_create(key)
+            s.revision += 1  # экран будет новым сообщением — старые в чате устаревают
+            self.storage.save(s)
+            return s
 
     def remember_ephemeral(self, s: Session, ephemeral_id: int) -> None:
         s.ephemeral_id = ephemeral_id
