@@ -197,7 +197,7 @@ def test_loss_counted(service):
 # --- рендер ---
 
 def test_post_text_and_keypad():
-    html = render.public_post()
+    html = render.public_post("test_bot")
     # три абзаца до игры — один блок, между ними пустая строка
     assert html.startswith("<p>После планёрки наш эксперт по безопасной разработке")
     assert "подсказкой: <tg-spoiler>«Пароль — день," in html

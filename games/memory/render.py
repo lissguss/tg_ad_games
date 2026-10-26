@@ -7,6 +7,8 @@ callback_data:
   общий пост    p:<карточка>                    например p:7
   личный экран  c:<карточка>:<пост>:<ревизия>   например c:7:2:12
                 new:-:<пост>:<ревизия>          «Сыграть ещё»
+  «🎮 Играть в боте» — ссылка t.me/<бот>?start=memory: та же игра экраном в чате с ботом,
+                где пост = 0 (CHAT_GAME); на iPhone так видно само поле
 Эмодзи закрытых карточек нет ни в тексте, ни в callback_data — раскладка только на сервере.
 """
 from __future__ import annotations
@@ -23,6 +25,8 @@ BACK = "❓"
 FOUND_STYLE = "success"  # найденные пары — зелёные
 WIN_LINE = "Все пары найдены! Ставьте 🔥 под постом"
 PLAY_AGAIN = "Сыграть ещё"
+START = "memory"  # /start memory — игра в чате с ботом
+BOT_BUTTON = "🎮 Играть в боте"
 
 
 def _button(text: str, data: str, style: str | None = None) -> str:
@@ -51,8 +55,14 @@ def _wrap(field: str) -> str:
     return "".join(parts)
 
 
-def public_post() -> str:
-    return _wrap(_grid([_button(BACK, f"p:{i}") for i in range(CARDS)]))
+def _bot_button(bot_username: str) -> str:
+    """Ссылка в чат с ботом: на iPhone личный экран в посте не открывается, а там игра видна целиком."""
+    url = f"https://t.me/{bot_username}?start={START}"
+    return _row(f'<tg-button type="url" url="{url}">{BOT_BUTTON}</tg-button>')
+
+
+def public_post(bot_username: str) -> str:
+    return _wrap(_grid([_button(BACK, f"p:{i}") for i in range(CARDS)]) + _bot_button(bot_username))
 
 
 def personal_screen(s: Session) -> str:

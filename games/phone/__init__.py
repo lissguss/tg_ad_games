@@ -1,8 +1,8 @@
 """Игра «Взломайте телефон»: подобрать пароль-дату из 6 цифр за 5 попыток."""
 from __future__ import annotations
 
-from .handlers import router
-from .render import public_post
+from .handlers import open_in_bot_chat, router
+from .render import START, public_post
 from .service import GameService
 from .storage import Storage
 
@@ -14,8 +14,8 @@ def create_service(db_path: str, ttl_seconds: int) -> GameService:
     return GameService(Storage(db_path), ttl_seconds=ttl_seconds)
 
 
-def post_html() -> str:
-    return public_post()
+def post_html(bot_username: str) -> str:
+    return public_post(bot_username)
 
 
 def on_published(service: GameService, chat_id: int, message_id: int) -> None:

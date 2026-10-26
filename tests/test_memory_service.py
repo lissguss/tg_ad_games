@@ -180,14 +180,15 @@ def test_layout_hidden_from_message(service):
     assert shown == [LAYOUT[0]]  # видна только открытая карточка
     assert html.count(LAYOUT[0]) == 1
     for e in EMOJIS:
-        assert e not in render.public_post().replace("эмодзи", "")
+        assert e not in render.public_post("test_bot").replace("эмодзи", "")
 
 
 def test_post_contains_text_and_field():
-    html = render.public_post()
+    html = render.public_post("test_bot")
     assert "<p>Спрятали под кнопками шесть пар эмодзи. Сможете найти все?</p>" in html
     assert html.count("❓") == 12
-    assert html.count("<tg-button-row") == 4
+    assert html.count("<tg-button-row") == 5  # поле 4 ряда + «Играть в боте»
+    assert 'url="https://t.me/test_bot?start=memory"' in html
     assert render.FIELD_MARK not in html
 
 
@@ -197,7 +198,7 @@ def test_callback_data_fits_64_bytes(service):
     for data in re.findall(r'data="([^"]+)"', render.personal_screen(s)):
         assert 1 <= len(data.encode()) <= 64
         assert render.parse_screen_data(data)
-    for data in re.findall(r'data="([^"]+)"', render.public_post()):
+    for data in re.findall(r'data="([^"]+)"', render.public_post("test_bot")):
         assert render.parse_post_data(data) is not None
 
 

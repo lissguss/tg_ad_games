@@ -6,7 +6,7 @@ import re
 import pytest
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
-from aiogram.types import Message, Update
+from aiogram.types import Message, Update, User
 
 from bot import admin, fallback
 from bot.config import Config
@@ -21,6 +21,8 @@ class FakeSession(BaseSession):
         self.calls = []
 
     async def make_request(self, bot, method, timeout=None):
+        if type(method).__name__ == "GetMe":  # имя бота для ссылки «Играть в боте»
+            return User.model_validate({"id": 1, "is_bot": True, "first_name": "b", "username": "test_bot"})
         self.calls.append(method)
         if type(method).__name__ == "SendRichMessage":
             return Message.model_validate({
@@ -145,6 +147,7 @@ def test_admin_publishes_both_games_to_channel(command):
         post, reply = send(cmd)
         assert type(post).__name__ == "SendRichMessage" and post.chat_id == CHAT
         assert mark in post.rich_message.html
+        assert "https://t.me/test_bot?start=" in post.rich_message.html  # кнопка «Играть в боте»
         assert "опубликована" in reply.text
     assert ps.storage.stats()["posts"] == 1
 
