@@ -1,6 +1,6 @@
 """Команды в личке с ботом: /start, /games, /stats и публикация игр (только для ADMIN_IDS).
 Те же команды показываются админам в кнопке «Меню» (setMyCommands).
-/start <игра> (кнопка «🎮 Играть в боте» под постом) открывает игру в чате с ботом — для всех."""
+/start <игра> открывает игру в чате с ботом — для всех: туда ведёт любая кнопка поста с игрой."""
 from __future__ import annotations
 
 import logging
@@ -61,12 +61,14 @@ async def on_start(message: Message, bot: Bot, config: Config, command: CommandO
     found = _game_by_start(command.args)
     if found is not None and message.from_user is not None:
         game, service_name = found
-        await game.open_in_bot_chat(bot, data[service_name], message.from_user.id, message.chat.id)
+        await game.open_in_bot_chat(bot, data[service_name], message.from_user.id, message.chat.id,
+                                    message.message_id)
         return
     if _is_admin(message, config):
         await message.answer(games_text())
     else:
-        await message.answer("Привет! Я веду игры в канале. Играть можно прямо в посте.")
+        await message.answer("Привет! Здесь игры из канала: нажмите любую кнопку под постом с игрой — "
+                             "она откроется тут.")
 
 
 @router.message(Command("games"))
@@ -87,9 +89,8 @@ def _publisher(game, service_name: str):
     async def on_publish(message: Message, bot: Bot, config: Config, **data):
         if not _is_admin(message, config):
             return
-        me = await bot.me()
         sent = await bot.send_rich_message(
-            chat_id=config.channel_id, rich_message=InputRichMessage(html=game.post_html(me.username)),
+            chat_id=config.channel_id, rich_message=InputRichMessage(html=game.post_html()),
         )
         game.on_published(data[service_name], config.channel_id, sent.message_id)
         log.info("%s: опубликован пост %s", game.COMMAND, sent.message_id)
