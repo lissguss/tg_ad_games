@@ -101,6 +101,27 @@ def resume_pending_flips(bot: Bot, service: GameService) -> None:
 
 # --- нажатия ---
 
+async def _press_on_post(cq: CallbackQuery, bot: Bot, service: GameService, card: int) -> None:
+    """Нажатие в посте — где бы он ни был (обычно в канале, куда его переслали): личный экран
+    открывается на месте поста. Не открылся — ведём в игру в чате с ботом."""
+    user_id, chat_id, post_id = cq.from_user.id, cq.message.chat.id, cq.message.message_id
+
+    async def deliver(s: Session):
+        screen_id = await _with_retry(lambda: botchat.show_in_post(bot, cq, render.personal_screen(s)))
+        service.remember_ephemeral(s, screen_id)  # сюда же перерисует автопереворот пары
+
+    try:
+        out = await service.press_on_post(user_id, chat_id, post_id, card, deliver)
+    except Exception:
+        log.warning("личный экран в посте не открылся, ведём в чат с ботом", exc_info=True)
+        me = await bot.me()
+        await cq.answer(url=botchat.bot_link(me.username, render.START))
+        return
+    _log("post", user_id, post_id, f"p:{card}", out)
+    schedule_flip(bot, service, out.session)
+    await cq.answer(out.toast)
+
+
 def _log(where: str, user_id: int, post_id: int, action: str, out: Outcome) -> None:
     g = out.session.game
     log.info("%s user=%s post=%s %s -> %s found=%s/12 %s", where, user_id, post_id, action,
@@ -117,16 +138,17 @@ async def on_callback(cq: CallbackQuery, bot: Bot, event_update: Update, service
         return
     user_id, chat_id = cq.from_user.id, msg.chat.id
     ephemeral_id = getattr(msg, "ephemeral_message_id", None)
-    screen_id = ephemeral_id or (msg.message_id if botchat.is_bot_chat(chat_id) else None)
+    card = render.parse_post_data(cq.data)
 
-    if not screen_id:
-        # нажатие в общем посте: любая кнопка открывает игру в чате с ботом
-        me = await bot.me()
-        log.info("post user=%s post=%s %s -> bot chat", user_id, msg.message_id, cq.data)
-        await cq.answer(url=botchat.bot_link(me.username, render.START))
+    if card is not None and not ephemeral_id:
+        await _press_on_post(cq, bot, service, card)
         return
 
-    # нажатие в игре в чате с ботом (или в личном экране, открытом в посте раньше)
+    # нажатие в личном экране в посте или в игре в чате с ботом
+    screen_id = ephemeral_id or (msg.message_id if botchat.is_bot_chat(chat_id) else None)
+    if not screen_id:
+        await cq.answer("Экран устарел — нажмите кнопку в посте")
+        return
     parsed = render.parse_screen_data(cq.data)
     if not parsed:
         await cq.answer("Экран устарел — нажмите кнопку в посте")

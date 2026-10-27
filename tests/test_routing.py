@@ -49,9 +49,9 @@ def env(tmp_path):
     bot = Bot("1:x", session=session)
     counter = iter(range(1, 10**6))
 
-    def press(data, post_id, ephemeral_id=None):
+    def press(data, post_id, ephemeral_id=None, chat=(CHAT, "channel")):
         msg = {"message_id": 0 if ephemeral_id else post_id, "date": 0,
-               "chat": {"id": CHAT, "type": "channel"}}
+               "chat": {"id": chat[0], "type": chat[1]}}
         if ephemeral_id:
             msg["ephemeral_message_id"] = ephemeral_id
         update = Update.model_validate({"update_id": next(counter), "callback_query": {
@@ -74,25 +74,44 @@ def test_memory_patterns_do_not_match_phone():
         assert re.match(memory.render.CALLBACK_RE, data)
 
 
-def test_phone_post_press_opens_the_bot_and_does_not_touch_memory(env):
+def test_phone_post_press_opens_screen_in_post_and_does_not_touch_memory(env):
     press, ms, ps = env
-    for data in ("phone:1", "phone:del", "phone:ok", "phone:-"):
-        names, calls = press(data, PHONE_POST)
-        assert names == ["AnswerCallbackQuery"]
-        assert calls[0].url == "https://t.me/test_bot?start=phone"
-    assert ps.storage.db.execute("SELECT COUNT(*) FROM phone_sessions").fetchone()[0] == 0
+    names, calls = press("phone:1", PHONE_POST)
+    assert names == ["SendRichMessage", "AnswerCallbackQuery"]
+    params = calls[0].ephemeral_message_parameters
+    assert (params.receiver_user_id, params.replace_callback_query_message) == (USER, True)
+    s = ps.storage.load(USER, CHAT, PHONE_POST)
+    assert s.game.current == "1"  # цифра из поста сразу введена
+    assert s.ephemeral_id == 901 and f'data="phone:del:{PHONE_POST}:{s.revision}"' in calls[0].rich_message.html
+    for data in ("phone:del", "phone:ok", "phone:open", "phone:-"):  # только открывают экран
+        names, _ = press(data, PHONE_POST)
+        assert names == ["SendRichMessage", "AnswerCallbackQuery"]
+    assert ps.storage.load(USER, CHAT, PHONE_POST).game.current == "1"
     assert ms.storage.db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
     assert ms.storage.db.execute("SELECT COUNT(*) FROM processed_updates").fetchone()[0] == 0
 
 
-def test_memory_post_press_opens_the_bot_and_does_not_touch_phone(env):
+def test_memory_post_press_opens_screen_in_post_and_does_not_touch_phone(env):
     press, ms, ps = env
     names, calls = press("p:3", MEMORY_POST)
-    assert names == ["AnswerCallbackQuery"]
-    assert calls[0].url == "https://t.me/test_bot?start=memory"
-    assert ms.storage.db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
+    assert names == ["SendRichMessage", "AnswerCallbackQuery"]
+    s = ms.storage.load(USER, CHAT, MEMORY_POST)
+    assert s.game.opened == [3] and s.ephemeral_id == 901
     assert ps.storage.db.execute("SELECT COUNT(*) FROM phone_sessions").fetchone()[0] == 0
     assert ps.storage.db.execute("SELECT COUNT(*) FROM phone_processed_updates").fetchone()[0] == 0
+
+
+def test_post_press_falls_back_to_bot_chat_if_screen_fails(env, monkeypatch):
+    press, ms, ps = env
+
+    async def fail(*args, **kwargs):
+        raise RuntimeError("личный экран не открылся")
+
+    monkeypatch.setattr("games.botchat.show_in_post", fail)
+    for data, start in (("phone:1", "phone"), ("p:3", "memory")):
+        names, calls = press(data, PHONE_POST)
+        assert names == ["AnswerCallbackQuery"]
+        assert calls[0].url == f"https://t.me/test_bot?start={start}"
 
 
 def opened_screen(service, post_id, ephemeral_id):
@@ -189,3 +208,26 @@ def test_view_cell_on_screen_does_nothing(env):
     names, _ = press("phone:-", PHONE_POST, ephemeral_id=903)
     assert names == ["AnswerCallbackQuery"]
     assert ps.storage.load(USER, CHAT, PHONE_POST).revision == s.revision
+
+
+@pytest.mark.parametrize("chat", [(-200, "channel"), (-300, "supergroup"), (333, "private")])
+def test_forwarded_post_opens_screen_where_it_was_pressed(env, chat):
+    """Пост пересылается из лички с ботом куда угодно: личный экран открывается там, где нажали."""
+    press, ms, ps = env
+    for data in ("p:3", "phone:1"):
+        names, calls = press(data, PHONE_POST, chat=chat)
+        assert names == ["SendRichMessage", "AnswerCallbackQuery"]
+        assert int(calls[0].chat_id) == chat[0]
+    assert ps.storage.load(USER, chat[0], PHONE_POST).game.current == "1"
+    assert ms.storage.load(USER, chat[0], PHONE_POST).game.opened == [3]
+
+
+def test_screen_button_outside_screen_is_stale(env):
+    press, ms, ps = env
+    names, calls = press(f"phone:1:{PHONE_POST}:1", PHONE_POST)
+    assert names == ["AnswerCallbackQuery"] and "устарел" in calls[0].text
+
+
+def test_post_cells_differ_from_screen_cells():
+    assert 'data="phone:open"' in phone.render.public_post()
+    assert 'data="phone:-"' not in phone.render.public_post()

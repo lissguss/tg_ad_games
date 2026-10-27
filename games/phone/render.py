@@ -4,11 +4,13 @@
 строка [игра] — место для экрана и клавиатуры.
 
 callback_data (все начинаются с phone:):
-  общий пост    phone:<цифра>, phone:del, phone:ok  любая кнопка открывает игру в чате с ботом
+  общий пост    phone:<цифра>, phone:del, phone:ok  открывают личный экран на месте поста, цифра сразу вводится
   личный экран  phone:<действие>:<пост>:<ревизия>   например phone:1:2:12, phone:new:2:20
   действие: цифра 0–9, del, ok, new («Играть снова»)
-  phone:-       клетки строки ввода и попыток: в посте открывает игру, в личном экране ничего не делает
-  игра в чате с ботом: /start phone, там пост = 0 (CHAT_GAME), кнопки как в личном экране
+  phone:-       клетки строки ввода и попыток на экране игры: ничего не делают
+  phone:open    клетки строки ввода в посте: открывают личный экран, как и остальные кнопки поста
+                (в постах, опубликованных до пересылки, клетки — phone:-)
+  запасной путь — игра в чате с ботом: /start phone, там пост = 0 (CHAT_GAME), кнопки как в личном экране
                 (это обычные кнопки, а не disabled, чтобы цифры не были бледными)
 Пароля нет ни в callback_data, ни в тексте экрана.
 """
@@ -25,6 +27,8 @@ GAME_MARK = "[игра]"
 PREFIX = "phone:"
 
 VIEW_DATA = f"{PREFIX}{VIEW}"
+OPEN = "open"
+POST_CELL_DATA = f"{PREFIX}{OPEN}"
 
 # цвета только у отметок в строках попыток; клавиатура и остальные кнопки без цвета
 MARK_STYLE = {HIT: "success", NEAR: "primary"}
@@ -46,9 +50,9 @@ def _button(text: str, data: str, style: str | None = None) -> str:
     return f'<tg-button type="callback_data"{st} data="{data}">{text}</tg-button>'
 
 
-def _cell(text: str, style: str | None = None) -> str:
+def _cell(text: str, style: str | None = None, data: str = VIEW_DATA) -> str:
     """Клетка строки ввода или попытки. Не disabled: такие кнопки Telegram рисует бледными."""
-    return _button(text, VIEW_DATA, style)
+    return _button(text, data, style)
 
 
 def _disabled(text: str, style: str | None = None) -> str:
@@ -60,15 +64,16 @@ def _row(*buttons: str) -> str:
     return '<tg-button-row align="center">' + "".join(buttons) + "</tg-button-row>"
 
 
-def _display(current: str) -> str:
+def _display(current: str, cell_data: str = VIEW_DATA) -> str:
     """Набранные цифры, на пустых местах точки."""
-    return _row(*(_cell(current[i] if i < len(current) else EMPTY) for i in range(CODE_LENGTH)))
+    return _row(*(_cell(current[i] if i < len(current) else EMPTY, data=cell_data)
+                  for i in range(CODE_LENGTH)))
 
 
 def _keypad(data, current: str, always_active: bool = False) -> str:
     """Раскладка как у телефона: * и # неактивны. «Удалить» активна, когда есть что удалять,
     «Проверить» — когда набраны все цифры. В общем посте активны всегда: любая кнопка поста
-    открывает игру в чате с ботом. data(action) -> callback_data."""
+    открывает личный экран. data(action) -> callback_data."""
     rows = [_row(*(_button(d, data(d)) for d in line)) for line in KEYPAD]
     rows.append(_row(_disabled("*"), _button("0", data("0")), _disabled("#")))
     can_delete = always_active or bool(current)
@@ -109,13 +114,15 @@ def _wrap(game_block: str) -> str:
     return "".join(parts)
 
 
-def _playing(game: Game, data, always_active: bool = False) -> str:
+def _playing(game: Game, data, always_active: bool = False, cell_data: str = VIEW_DATA) -> str:
     return (f"<p>{ATTEMPT_LINE.format(n=game.attempt_number)}</p>"
-            + _history(game) + _display(game.current) + _keypad(data, game.current, always_active))
+            + _history(game) + _display(game.current, cell_data)
+            + _keypad(data, game.current, always_active))
 
 
 def public_post() -> str:
-    return _wrap(_playing(Game(), lambda action: f"{PREFIX}{action}", always_active=True))
+    return _wrap(_playing(Game(), lambda action: f"{PREFIX}{action}", always_active=True,
+                          cell_data=POST_CELL_DATA))
 
 
 def personal_screen(s: Session) -> str:
@@ -133,9 +140,10 @@ def personal_screen(s: Session) -> str:
 
 
 def parse_post_data(data: str) -> str | None:
-    """phone:<действие> → действие."""
+    """phone:<действие> → действие. Клетку phone:- сюда не относим: она есть и на экране игры."""
     parts = data.split(":")
-    if len(parts) == 2 and parts[0] + ":" == PREFIX and parts[1] in ACTIONS:
+    if (len(parts) == 2 and parts[0] + ":" == PREFIX and parts[1] != VIEW
+            and (parts[1] in ACTIONS or parts[1] == OPEN)):
         return parts[1]
     return None
 

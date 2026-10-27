@@ -1,8 +1,7 @@
 """Обработка нажатий: сессии, ревизии, блокировки, переворот пар. Без вызовов Telegram — их делает handlers.py.
 
-Играют в чате с ботом: любая кнопка поста открывает бота (/start memory), игра там — одно
-сообщение, которое перерисовывается при каждом нажатии. Личные экраны в посте (они ещё живы
-у тех, кто открыл их раньше) обрабатываются так же."""
+Играют в личном экране на месте поста: нажатие в посте открывает его и сразу открывает карточку.
+Запасной вариант — игра в чате с ботом (/start memory, пост = CHAT_GAME), устроена так же."""
 from __future__ import annotations
 
 import asyncio
@@ -113,6 +112,20 @@ class GameService:
             s.revision += 1
             self.storage.save(s)
             return await self._deliver(Outcome(s, None, changed=True), deliver)
+
+    async def press_on_post(self, user_id: int, chat_id: int, message_id: int, card: int,
+                            deliver: Deliver = None, now: float | None = None) -> Outcome:
+        """Нажатие на карточку в посте: открыть личный экран (та же партия, если она есть)
+        и сразу открыть карточку."""
+        key = (user_id, chat_id, message_id)
+        async with self._lock(key):
+            s, _, expired = self._load_or_create(key)
+            toast, _ = s.game.press(card, time.time() if now is None else now)
+            if expired:
+                toast = MSG_EXPIRED
+            s.revision += 1  # экран будет новый — кнопки прежнего экрана устаревают
+            self.storage.save(s)
+            return await self._deliver(Outcome(s, toast, changed=True), deliver)
 
     async def open_in_chat(self, user_id: int, chat_id: int) -> Session:
         """/start memory: игра в чате с ботом."""

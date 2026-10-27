@@ -171,11 +171,11 @@ def test_post_text_and_keypad():
     assert html.endswith("<p>@alfadigital_jobs</p>")
     assert render.GAME_MARK not in html
     datas = re.findall(r'data="([^"]+)"', html)
-    # «Удалить» и «Проверить» в посте активны (на iPhone игра идёт по кнопкам поста), * и # неактивны
+    # «Удалить» и «Проверить» в посте активны (любая кнопка поста открывает игру), * и # неактивны
     assert sorted(set(datas)) == sorted(
-        [f"phone:{d}" for d in "0123456789"] + ["phone:-", "phone:del", "phone:ok"]
+        [f"phone:{d}" for d in "0123456789"] + ["phone:open", "phone:del", "phone:ok"]
     )
-    assert datas.count("phone:-") == 6  # строка ввода — обычные кнопки, не бледные
+    assert datas.count("phone:open") == 6  # строка ввода — обычные кнопки, не бледные
     assert '<tg-button type="disabled">*</tg-button>' in html
     assert '<tg-button type="disabled">#</tg-button>' in html
     assert "style=" not in html  # клавиатура без цвета

@@ -65,6 +65,26 @@ async def open_in_bot_chat(bot: Bot, service: GameService, user_id: int, chat_id
     log.info("bot chat user=%s opened, attempts=%s", user_id, len(s.game.attempts))
 
 
+async def _press_on_post(cq: CallbackQuery, bot: Bot, service: GameService, action: str) -> None:
+    """Нажатие в посте — где бы он ни был (обычно в канале, куда его переслали): личный экран
+    открывается на месте поста. Не открылся — ведём в игру в чате с ботом."""
+    user_id, chat_id, post_id = cq.from_user.id, cq.message.chat.id, cq.message.message_id
+
+    async def deliver(s: Session):
+        screen_id = await _with_retry(lambda: botchat.show_in_post(bot, cq, render.personal_screen(s)))
+        service.remember_ephemeral(s, screen_id)
+
+    try:
+        out = await service.press_on_post(user_id, chat_id, post_id, action, deliver)
+    except Exception:
+        log.warning("личный экран в посте не открылся, ведём в чат с ботом", exc_info=True)
+        me = await bot.me()
+        await cq.answer(url=botchat.bot_link(me.username, render.START))
+        return
+    _log("post", user_id, post_id, f"phone:{action}", out)
+    await cq.answer(out.toast)
+
+
 @router.callback_query(F.data.startswith(render.PREFIX))
 async def on_callback(cq: CallbackQuery, bot: Bot, event_update: Update, phone_service: GameService):
     service = phone_service
@@ -77,15 +97,18 @@ async def on_callback(cq: CallbackQuery, bot: Bot, event_update: Update, phone_s
     user_id, chat_id = cq.from_user.id, msg.chat.id
     ephemeral_id = getattr(msg, "ephemeral_message_id", None)
     screen_id = ephemeral_id or (msg.message_id if botchat.is_bot_chat(chat_id) else None)
+    action = render.parse_post_data(cq.data)
+    if action is None and cq.data == render.VIEW_DATA and not screen_id:
+        action = render.OPEN  # клетка в посте, опубликованном ещё прямо в канал
 
-    if not screen_id:
-        # нажатие в общем посте: любая кнопка открывает игру в чате с ботом
-        me = await bot.me()
-        log.info("post user=%s post=%s %s -> bot chat", user_id, msg.message_id, cq.data)
-        await cq.answer(url=botchat.bot_link(me.username, render.START))
+    if action is not None and not ephemeral_id:
+        await _press_on_post(cq, bot, service, action)
         return
 
-    # нажатие в игре в чате с ботом (или в личном экране, открытом в посте раньше)
+    # нажатие в личном экране в посте или в игре в чате с ботом
+    if not screen_id:
+        await cq.answer("Экран устарел — нажмите кнопку в посте")
+        return
     if cq.data == render.VIEW_DATA:
         await cq.answer()  # клетка ввода или попытки — ничего не делаем
         return
