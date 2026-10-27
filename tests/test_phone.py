@@ -101,70 +101,32 @@ def test_loss_after_five_attempts_and_input_blocked():
 
 # --- сервис ---
 
-def post(service, action, user=U1):
-    return run(service.press_on_post(user, CHAT, POST, action))
+def begin(service, user=U1, first=None):
+    """Открыть игру (как /start) и, если нужно, набрать первую цифру."""
+    s = run(service.open(user, CHAT, POST))
+    return tap(service, s, first, user=user).session if first else s
 
 
-def test_first_digit_on_post_starts_game(service):
-    out = post(service, "1")
-    assert out.session.game.current == "1"
-    assert out.toast == "Попытка 1 из 5. Набрано: 1 • • • • •" and not out.alert
+def test_open_starts_an_empty_game(service):
+    s = begin(service)
+    assert (s.game.current, s.game.attempts, s.revision) == ("", [], 1)
 
 
-def test_delete_on_post_before_game(service):
-    assert post(service, "del").toast == "Нечего удалять. Набрано: • • • • • •"
+def test_reopen_keeps_progress_and_retires_the_old_screen(service):
+    s = begin(service, first="1")
+    again = run(service.open(U1, CHAT, POST))
+    assert again.game.current == "1" and again.revision == s.revision + 1
+    assert tap(service, s, "7").toast == MSG_STALE_SCREEN
 
 
-def test_post_press_continues_the_game(service):
-    post(service, "1")
-    post(service, "7")
-    assert post(service, "del").toast == "Попытка 1 из 5. Набрано: 1 • • • • •"
-    out = post(service, "ok")
-    assert out.toast == "Введите 6 цифр. Набрано: 1 • • • • •" and out.session.game.current == "1"
-
-
-def test_whole_game_is_playable_from_the_post(service):
-    """iPhone не показывает личный экран: цифры, «Удалить» и «Проверить» работают кнопками поста."""
-    for d in WRONG:
-        post(service, d)
-    checked = post(service, "ok")
-    assert checked.alert
-    assert checked.toast.splitlines() == [
-        "Попытка 1 из 5: не подошло",
-        "234567 🟦⬜⬜⬜🟦🟦",
-        "🟩 на месте · 🟦 есть, но не там",
-        "Осталось попыток: 4",
-    ]
-    for d in PASSWORD:
-        post(service, d)
-    won = post(service, "ok")
-    assert won.session.game.status == WON and won.alert
-    assert won.toast.splitlines()[0] == "🎉 Телефон разблокирован, запоминайте дату 📆"
-    assert post(service, "5").session.game.status == WON  # после победы цифры не вводятся
-    assert service.storage.stats()["wins"] == 1
-
-
-def test_lost_game_restarts_from_the_post(service):
-    for _ in range(MAX_ATTEMPTS):
-        for d in WRONG:
-            post(service, d)
-        last = post(service, "ok")
-    assert last.session.game.status == LOST and last.alert
-    assert last.toast.startswith("🔒 Попытки закончились")
-    assert PASSWORD not in last.toast
-    assert len(last.toast) <= 200
-    fresh = post(service, "1")
-    assert fresh.session.game.status == PLAYING and fresh.session.game.attempts == []
-    assert fresh.toast == "Новая игра. Попытка 1 из 5. Набрано: 1 • • • • •"
-
-
-def test_post_presses_never_blame_the_app(service):
-    toasts = [post(service, a).toast for a in ["1", "-", "del", "ok", "2", "2"]]
-    assert not any("Обновите" in t for t in toasts)
+def test_view_cell_changes_nothing(service):
+    s = begin(service, first="1")
+    out = tap(service, s, "-")
+    assert out.session.game.current == "1" and out.changed and out.toast is None
 
 
 def test_stale_revision_not_applied(service):
-    s = run(service.press_on_post(U1, CHAT, POST, "1")).session
+    s = begin(service, first="1")
     old = s.revision
     s = tap(service, s, "7").session
     out = tap(service, s, "9", revision=old)
@@ -172,7 +134,7 @@ def test_stale_revision_not_applied(service):
 
 
 def test_win_logs_attempts_and_stats(service):
-    s = run(service.press_on_post(U1, CHAT, POST, "1")).session
+    s = begin(service, first="1")
     s = tap(service, s, "del").session
     s = type_code(service, s, WRONG)
     s = type_code(service, s, PASSWORD)
@@ -185,7 +147,7 @@ def test_win_logs_attempts_and_stats(service):
 
 
 def test_loss_counted(service):
-    s = run(service.press_on_post(U2, CHAT, POST, "del")).session
+    s = begin(service, U2)
     for _ in range(MAX_ATTEMPTS):
         for d in WRONG:
             s = run(service.press_on_screen(U2, CHAT, POST, d, s.revision)).session
@@ -197,7 +159,7 @@ def test_loss_counted(service):
 # --- рендер ---
 
 def test_post_text_and_keypad():
-    html = render.public_post("test_bot")
+    html = render.public_post()
     # три абзаца до игры — один блок, между ними пустая строка
     assert html.startswith("<p>После планёрки наш эксперт по безопасной разработке")
     assert "подсказкой: <tg-spoiler>«Пароль — день," in html
@@ -221,7 +183,7 @@ def test_post_text_and_keypad():
 
 
 def test_password_never_in_screen(service):
-    s = run(service.press_on_post(U1, CHAT, POST, "1")).session
+    s = begin(service, first="1")
     assert PASSWORD not in render.personal_screen(s)
     for _ in range(MAX_ATTEMPTS):
         s = type_code(service, s, WRONG)
@@ -230,7 +192,7 @@ def test_password_never_in_screen(service):
 
 
 def test_screen_callback_data_prefixed_and_short(service):
-    s = run(service.press_on_post(U1, CHAT, POST, "1")).session
+    s = begin(service, first="1")
     s.revision = 10**9
     s.message_id = 10**10
     for data in re.findall(r'data="([^"]+)"', render.personal_screen(s)):
@@ -239,7 +201,7 @@ def test_screen_callback_data_prefixed_and_short(service):
 
 
 def test_delete_and_check_enabled_by_input(service):
-    s = run(service.press_on_post(U1, CHAT, POST, "1")).session
+    s = begin(service, first="1")
     html = render.personal_screen(s)
     assert f'data="phone:del:{POST}:{s.revision}"' in html
     assert f'data="phone:ok:' not in html
@@ -250,7 +212,7 @@ def test_delete_and_check_enabled_by_input(service):
 
 
 def test_attempt_rows_colored_keypad_not(service):
-    s = run(service.press_on_post(U1, CHAT, POST, "del")).session
+    s = begin(service)
     s = type_code(service, s, "711000")
     html = render.personal_screen(s)
     assert "<b>Попытка #2</b>" in html
@@ -262,9 +224,3 @@ def test_attempt_rows_colored_keypad_not(service):
     ]) + "</tg-button-row>"
     assert row in html
     assert html.count("style=") == 3  # только в строке попытки
-
-
-def test_view_cell_on_post_opens_game_without_input(service):
-    out = run(service.press_on_post(U1, CHAT, POST, "-"))
-    assert out.toast == "Попытка 1 из 5. Набрано: • • • • • •"
-    assert out.session.game.current == "" and out.changed

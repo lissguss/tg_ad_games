@@ -30,11 +30,11 @@ def run(coro):
 
 
 def start(service, user=U1, card=0, now=None):
-    """Первое нажатие в посте; подменяем раскладку на известную."""
-    s = run(service.press_on_post(user, CHAT, POST, card, now=now)).session
+    """Открыть игру и первую карточку; раскладку подменяем на известную."""
+    s = run(service.open(user, CHAT, POST))
     s.game.layout = list(LAYOUT)
     service.storage.save(s)
-    return s
+    return run(service.press_on_screen(user, CHAT, POST, CARD, card, s.revision, now=now)).session
 
 
 def tap(service, s, card, user=U1, revision=None, now=None):
@@ -42,7 +42,7 @@ def tap(service, s, card, user=U1, revision=None, now=None):
     return run(service.press_on_screen(user, CHAT, POST, CARD, card, rev, now=now))
 
 
-def test_post_press_starts_game_and_opens_card(service):
+def test_open_and_first_card(service):
     s = start(service, card=5)
     assert s.game.opened == [5]
     assert s.game.status == PLAYING
@@ -133,18 +133,17 @@ def test_players_do_not_affect_each_other(service):
 
 def test_each_player_gets_own_random_layout(service):
     layouts = {
-        tuple(run(service.press_on_post(uid, CHAT, POST, 0)).session.game.layout)
+        tuple(run(service.open(uid, CHAT, POST)).game.layout)
         for uid in range(1, 30)
     }
     assert len(layouts) > 1
 
 
-def test_post_press_restores_existing_game(service):
+def test_reopen_keeps_the_game_and_retires_the_old_screen(service):
     s = start(service, now=100)
-    out = run(service.press_on_post(U1, CHAT, POST, 1, now=1000))  # приложение перезапустили
-    assert out.toast == f"{LAYOUT[0]} + {LAYOUT[0]} — пара! Найдено 1 из 6"  # игра продолжается
-    assert out.session.game.found == [0, 1]
-    assert out.session.revision > s.revision  # старый экран больше не действует
+    again = run(service.open(U1, CHAT, POST))  # /start ещё раз
+    assert again.game.opened == [0] and again.revision == s.revision + 1
+    assert tap(service, s, 1).toast == MSG_STALE_SCREEN  # кнопки старого сообщения не действуют
 
 
 def test_expired_session_starts_new_game(service):
@@ -180,15 +179,15 @@ def test_layout_hidden_from_message(service):
     assert shown == [LAYOUT[0]]  # видна только открытая карточка
     assert html.count(LAYOUT[0]) == 1
     for e in EMOJIS:
-        assert e not in render.public_post("test_bot").replace("эмодзи", "")
+        assert e not in render.public_post().replace("эмодзи", "")
 
 
 def test_post_contains_text_and_field():
-    html = render.public_post("test_bot")
+    html = render.public_post()
     assert "<p>Спрятали под кнопками шесть пар эмодзи. Сможете найти все?</p>" in html
     assert html.count("❓") == 12
-    assert html.count("<tg-button-row") == 5  # поле 4 ряда + «Играть в боте»
-    assert 'url="https://t.me/test_bot?start=memory"' in html
+    assert html.count("<tg-button-row") == 4
+    assert "url=" not in html  # кнопки поста — callback: бот сам открывает чат с игрой
     assert render.FIELD_MARK not in html
 
 
@@ -198,32 +197,5 @@ def test_callback_data_fits_64_bytes(service):
     for data in re.findall(r'data="([^"]+)"', render.personal_screen(s)):
         assert 1 <= len(data.encode()) <= 64
         assert render.parse_screen_data(data)
-    for data in re.findall(r'data="([^"]+)"', render.public_post("test_bot")):
+    for data in re.findall(r'data="([^"]+)"', render.public_post()):
         assert render.parse_post_data(data) is not None
-
-
-def post(service, card, user=U1, now=None):
-    return run(service.press_on_post(user, CHAT, POST, card, now=now))
-
-
-def test_post_press_describes_the_move(service):
-    """На iPhone личный экран не открывается: игра идёт по подсказкам на нажатия в посте."""
-    start(service, now=100)  # открыта карточка 0
-    pair = post(service, 1, now=101)
-    assert pair.toast == f"{LAYOUT[0]} + {LAYOUT[0]} — пара! Найдено 1 из 6" and not pair.alert
-    assert post(service, 4, now=102).toast == f"Карточка 5: {LAYOUT[4]}"
-    miss = post(service, 8, now=103)
-    assert miss.toast == f"{LAYOUT[4]} и {LAYOUT[8]} — не совпали, запоминайте"
-
-
-def test_post_presses_win_with_an_alert_and_never_blame_the_app(service):
-    start(service, now=100)
-    toasts = []
-    for card in range(1, CARDS):
-        out = post(service, card, now=100 + card)
-        toasts.append(out.toast or "")
-    assert out.session.game.status == WON and out.alert
-    assert out.toast.endswith("Все пары найдены! Ставьте 🔥 под постом")
-    assert not any("Обновите" in t for t in toasts)
-    again = post(service, 0, now=200)
-    assert again.alert and again.toast.endswith("Все пары найдены! Ставьте 🔥 под постом")

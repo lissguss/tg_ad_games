@@ -14,8 +14,8 @@ def create_service(db_path: str, ttl_seconds: int) -> GameService:
     return GameService(Storage(db_path), ttl_seconds=ttl_seconds)
 
 
-def post_html(bot_username: str) -> str:
-    return public_post(bot_username)
+def post_html() -> str:
+    return public_post()
 
 
 def on_published(service: GameService, chat_id: int, message_id: int) -> None:
