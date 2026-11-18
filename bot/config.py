@@ -20,6 +20,11 @@ def _read_env_file(path: pathlib.Path) -> dict[str, str]:
     return env
 
 
+def _parse_channel(value: str) -> int | str:
+    """id канала (-100…) или его @username."""
+    return value if value.startswith("@") else int(value)
+
+
 def _parse_ids(value: str) -> frozenset[int]:
     return frozenset(int(x) for x in value.replace(" ", "").split(",") if x)
 
@@ -27,7 +32,7 @@ def _parse_ids(value: str) -> frozenset[int]:
 @dataclass
 class Config:
     bot_token: str
-    channel_id: int
+    channel_id: int | str
     admin_ids: frozenset[int]
     db_path: str
     session_ttl_days: int
@@ -43,7 +48,7 @@ def load_config() -> Config:
         raise SystemExit(f"В .env не заполнено: {', '.join(missing)}")
     return Config(
         bot_token=env["BOT_TOKEN"],
-        channel_id=int(env["CHANNEL_ID"]),
+        channel_id=_parse_channel(env["CHANNEL_ID"]),
         admin_ids=_parse_ids(admins),
         db_path=env.get("DB_PATH") or str(ROOT / "game.db"),
         session_ttl_days=int(env.get("SESSION_TTL_DAYS") or 7),

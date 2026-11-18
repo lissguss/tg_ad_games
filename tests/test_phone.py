@@ -12,7 +12,7 @@ from games.phone.service import MSG_STALE_SCREEN, GameService
 from games.phone.storage import Storage
 
 U1, U2, CHAT, POST = 111, 222, -100, 7
-WRONG = "234567"
+WRONG = "2345"
 
 
 def run(coro):
@@ -44,22 +44,22 @@ def type_code(service, s, code):
 # --- логика ---
 
 def test_password_is_date():
-    assert PASSWORD == "171126" and len(PASSWORD) == 6
+    assert PASSWORD == "1711" and len(PASSWORD) == 4  # ДДММ
 
 
 def test_score_exact():
-    assert score(PASSWORD, PASSWORD) == [HIT] * 6
+    assert score(PASSWORD, PASSWORD) == [HIT] * 4
 
 
 def test_score_repeated_digits_like_wordle():
     # в пароле три единицы; лишние совпадения — серые
-    assert score("171126", "111111") == [HIT, MISS, HIT, HIT, MISS, MISS]
-    assert score("171126", "711000") == [NEAR, NEAR, HIT, MISS, MISS, MISS]
-    assert score("171126", "622222") == [NEAR, MISS, MISS, MISS, HIT, MISS]
+    assert score("1711", "1111") == [HIT, MISS, HIT, HIT]
+    assert score("1711", "7100") == [NEAR, NEAR, MISS, MISS]
+    assert score("1711", "1171") == [HIT, NEAR, NEAR, HIT]
 
 
 def test_score_no_digits():
-    assert score("171126", "333333") == [MISS] * 6
+    assert score("1711", "3333") == [MISS] * 4
 
 
 def test_repeated_digits_allowed_in_input():
@@ -69,7 +69,7 @@ def test_repeated_digits_allowed_in_input():
     assert g.current == "111"
 
 
-def test_seventh_digit_rejected():
+def test_fifth_digit_rejected():
     g = Game()
     for d in WRONG:
         g.press_digit(d)
@@ -175,7 +175,7 @@ def test_post_text_and_keypad():
     assert sorted(set(datas)) == sorted(
         [f"phone:{d}" for d in "0123456789"] + ["phone:open", "phone:del", "phone:ok"]
     )
-    assert datas.count("phone:open") == 6  # строка ввода — обычные кнопки, не бледные
+    assert datas.count("phone:open") == 4  # строка ввода — обычные кнопки, не бледные
     assert '<tg-button type="disabled">*</tg-button>' in html
     assert '<tg-button type="disabled">#</tg-button>' in html
     assert "style=" not in html  # клавиатура без цвета
@@ -205,7 +205,7 @@ def test_delete_and_check_enabled_by_input(service):
     html = render.personal_screen(s)
     assert f'data="phone:del:{POST}:{s.revision}"' in html
     assert f'data="phone:ok:' not in html
-    for d in "71126":
+    for d in "711":
         s = tap(service, s, d).session
     html = render.personal_screen(s)
     assert f'data="phone:ok:{POST}:{s.revision}"' in html
@@ -213,14 +213,14 @@ def test_delete_and_check_enabled_by_input(service):
 
 def test_attempt_rows_colored_keypad_not(service):
     s = begin(service)
-    s = type_code(service, s, "711000")
+    s = type_code(service, s, "7110")
     html = render.personal_screen(s)
     assert "<b>Попытка #2</b>" in html
     row = '<tg-button-row align="center">' + "".join([
         '<tg-button type="callback_data" style="primary" data="phone:-">7</tg-button>',
         '<tg-button type="callback_data" style="primary" data="phone:-">1</tg-button>',
         '<tg-button type="callback_data" style="success" data="phone:-">1</tg-button>',
-        '<tg-button type="callback_data" data="phone:-">0</tg-button>' * 3,
+        '<tg-button type="callback_data" data="phone:-">0</tg-button>',
     ]) + "</tg-button-row>"
     assert row in html
     assert html.count("style=") == 3  # только в строке попытки

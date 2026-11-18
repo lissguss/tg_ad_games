@@ -174,10 +174,11 @@ def test_memory_flip_redraws_the_bot_chat_message():
 def test_plain_start_and_unknown_payload_keep_the_greeting(env):
     start, press, ms, ps, session = env
     for payload in (None, "nothing"):
-        calls = start(payload)
+        calls = [c for c in start(payload) if names([c]) != ["GetChat"]]
         assert names(calls) == ["SendMessage"]
-        assert "нажмите любую кнопку под постом" in calls[0].text
-    assert names(start(None, user=ADMIN)) == ["SendMessage"]  # админу — список игр
+        assert "Игра проходит в нашем канале" in calls[0].text
+    # админу — меню команд и список игр
+    assert names(start(None, user=ADMIN)) == ["SetMyCommands", "SendMessage"]
 
 
 def test_bot_chat_games_are_not_counted_as_posts(env):

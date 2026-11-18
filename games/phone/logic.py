@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 
-PASSWORD = "171126"   # ДДММГГ, один на всех
+PASSWORD = "1711"   # ДДММ, один на всех: 6 кнопок в ряд на iPhone не помещаются
 CODE_LENGTH = len(PASSWORD)
 MAX_ATTEMPTS = 5
 
@@ -15,8 +15,8 @@ MISS = "miss"  # цифры нет (или все её вхождения уже
 PLAYING, WON, LOST = "playing", "won", "lost"
 
 # Тексты всплывающих уведомлений
-MSG_FULL = f"Уже {CODE_LENGTH} цифр — нажмите «Проверить»"
-MSG_NEED_ALL = f"Введите {CODE_LENGTH} цифр"
+MSG_FULL = f"Уже {CODE_LENGTH} цифры — нажмите «Проверить»"
+MSG_NEED_ALL = f"Введите {CODE_LENGTH} цифры"
 MSG_EMPTY = "Нечего удалять"
 MSG_FINISHED = "Игра окончена — нажмите «Играть снова»"
 

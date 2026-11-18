@@ -29,6 +29,11 @@ class FakeSession(BaseSession):
                 "message_id": 0, "date": 0, "chat": {"id": CHAT, "type": "channel"},
                 "ephemeral_message_id": 900 + len(self.calls),
             })
+        if type(method).__name__ == "SendMessage":
+            return Message.model_validate({
+                "message_id": 500 + len(self.calls), "date": 0, "text": method.text,
+                "chat": {"id": method.chat_id, "type": "private"},
+            })
         return True
 
     async def stream_content(self, *args, **kwargs):
@@ -154,27 +159,89 @@ def command(env, tmp_path):
     dp.include_routers(admin.router, memory.router, phone.router, fallback.router)
     counter = iter(range(10**6, 2 * 10**6))
 
+    def feed(update):
+        session.calls.clear()
+        asyncio.run(dp.feed_update(bot, Update.model_validate({"update_id": next(counter), **update})))
+        return session.calls
+
     def send(text, user=USER):
-        update = Update.model_validate({"update_id": next(counter), "message": {
+        return feed({"message": {
             "message_id": 1, "date": 0, "text": text,
             "chat": {"id": user, "type": "private"},
             "from": {"id": user, "is_bot": False, "first_name": "u"},
         }})
-        session.calls.clear()
-        asyncio.run(dp.feed_update(bot, update))
-        return session.calls
 
+    def click(data, message_id, user=USER):
+        """Нажатие «Да» / «Нет» под вопросом в личке админа."""
+        return feed({"callback_query": {
+            "id": "q", "from": {"id": user, "is_bot": False, "first_name": "u"},
+            "chat_instance": "0", "data": data,
+            "message": {"message_id": message_id, "date": 1, "text": admin.CONFIRM_QUESTION,
+                        "chat": {"id": USER, "type": "private"}},
+        }})
+
+    admin._pending.clear()
+    send.click = click
     return send, ps
 
 
-def test_admin_publishes_both_games_to_channel(command):
+def ask(send, cmd):
+    """Команда публикации: пост и вопрос приходят админу в личку. Возвращает (пост, id вопроса)."""
+    preview, get_chat, question = send(cmd)
+    assert type(preview).__name__ == "SendRichMessage" and preview.chat_id == USER
+    assert type(get_chat).__name__ == "GetChat" and get_chat.chat_id == CHAT
+    # имя канала FakeSession не отдаёт — в вопросе id канала из настроек
+    assert question.text == f"Вы уверены, что хотите опубликовать этот пост в канале {CHAT}?"
+    buttons = [b.callback_data for b in question.reply_markup.inline_keyboard[0]]
+    assert buttons == [admin.CONFIRM_YES, admin.CONFIRM_NO]
+    return preview, 500 + 3  # id вопроса из FakeSession: третий вызов
+
+
+def test_admin_publishes_both_games_to_channel_after_yes(command):
     send, ps = command
     for cmd, mark in (("/memory", "p:0"), ("/post_phone", "phone:0")):
-        post, reply = send(cmd)
+        preview, question_id = ask(send, cmd)
+        assert mark in preview.rich_message.html
+        post, _, edited, answer = send.click(admin.CONFIRM_YES, question_id)
         assert type(post).__name__ == "SendRichMessage" and post.chat_id == CHAT
-        assert mark in post.rich_message.html
-        assert "опубликована" in reply.text
+        assert post.rich_message.html == preview.rich_message.html  # уходит ровно то, что показали
+        assert edited.text.endswith(f"опубликована в канал {CHAT}.")
     assert ps.storage.stats()["posts"] == 1
+
+
+def test_no_does_not_publish(command):
+    send, ps = command
+    _, question_id = ask(send, "/post_phone")
+    calls = send.click(admin.CONFIRM_NO, question_id)
+    assert [type(c).__name__ for c in calls] == ["EditMessageText", "AnswerCallbackQuery"]
+    assert "не опубликован" in calls[0].text
+    assert ps.storage.stats()["posts"] == 0
+
+
+def test_second_yes_does_not_publish_again(command):
+    send, ps = command
+    _, question_id = ask(send, "/post_phone")
+    send.click(admin.CONFIRM_YES, question_id)
+    calls = send.click(admin.CONFIRM_YES, question_id)
+    assert "SendRichMessage" not in [type(c).__name__ for c in calls]
+    assert ps.storage.stats()["posts"] == 1
+
+
+def test_non_admin_cannot_confirm(command):
+    send, ps = command
+    _, question_id = ask(send, "/post_phone")
+    calls = send.click(admin.CONFIRM_YES, question_id, user=999)
+    assert [type(c).__name__ for c in calls] == ["AnswerCallbackQuery"]
+    assert ps.storage.stats()["posts"] == 0
+    send.click(admin.CONFIRM_YES, question_id)  # вопрос остался в силе для админа
+    assert ps.storage.stats()["posts"] == 1
+
+
+def test_non_admin_start_points_to_the_channel(command):
+    send, _ = command
+    get_chat, reply = send("/start", user=999)  # имя канала спрашивается у Telegram
+    assert type(get_chat).__name__ == "GetChat" and get_chat.chat_id == CHAT
+    assert reply.text.startswith("Игра проходит в нашем канале")
 
 
 def test_non_admin_cannot_publish(command):
@@ -231,3 +298,10 @@ def test_screen_button_outside_screen_is_stale(env):
 def test_post_cells_differ_from_screen_cells():
     assert 'data="phone:open"' in phone.render.public_post()
     assert 'data="phone:-"' not in phone.render.public_post()
+
+
+def test_question_names_the_channel(command, monkeypatch):
+    send, _ = command
+    monkeypatch.setattr(admin, "_channel_mention", "@test_channel")
+    preview, question = send("/post_phone")  # имя уже известно — Telegram не спрашиваем
+    assert question.text == "Вы уверены, что хотите опубликовать этот пост в канале @test_channel?"

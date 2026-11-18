@@ -1,0 +1,14 @@
+[Unit]
+Description=Telegram-бот (продакшн): игры в постах канала клиента
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/tg_ad_games_prod
+ExecStart=/opt/tg_ad_games_prod/.venv/bin/python -m bot
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
