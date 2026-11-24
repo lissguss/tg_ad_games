@@ -24,6 +24,7 @@
 
 ```
 bot/            запуск (python -m bot), настройки, команды в личке, ответ на чужие кнопки
+game/           запуск на хостинге агентства (python -m game), то же самое, что python -m bot
 games/memory/   «Мемори»
 games/phone/    «Взломайте телефон»
 games/oplatit_button/  интерактивный лонгрид о платежах
