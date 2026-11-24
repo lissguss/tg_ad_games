@@ -16,7 +16,7 @@ from aiogram.types import (
     InputRichMessage, Message,
 )
 
-from games import memory, phone
+from games import memory, oplatit_button, phone
 
 from .config import Config
 
@@ -25,14 +25,14 @@ router = Router()
 router.message.filter(F.chat.type == "private")
 
 # игра → имя её сервиса в Dispatcher (см. bot/__main__.py)
-GAMES = [(memory, "service"), (phone, "phone_service")]
+GAMES = [(memory, "service"), (phone, "phone_service"), (oplatit_button, "oplatit_service")]
 
 CONFIRM_QUESTION = "Вы уверены, что хотите опубликовать этот пост в канале {channel}?"
 CONFIRM_YES, CONFIRM_NO = "publish:yes", "publish:no"
 
-# ждут ответа «Да / Нет»: (чат, сообщение с вопросом) → (игра, имя сервиса, html поста).
+# (чат, сообщение с вопросом) → (игра, имя сервиса, html поста, снимок содержимого).
 # В памяти: после перезапуска бота вопрос устаревает, команду нужно отправить ещё раз.
-_pending: dict[tuple[int, int], tuple[object, str, str]] = {}
+_pending: dict[tuple[int, int], tuple[object, str, str, object | None]] = {}
 _channel_mention: str | None = None
 
 
@@ -87,7 +87,9 @@ def games_text() -> str:
 
 
 def _game_by_start(payload: str | None):
-    return next(((g, name) for g, name in GAMES if g.START == payload), None)
+    if not payload:
+        return None
+    return next(((g, name) for g, name in GAMES if getattr(g, "START", None) == payload), None)
 
 
 @router.message(CommandStart())
@@ -125,18 +127,21 @@ async def on_stats(message: Message, config: Config, **data):
 
 
 def _publisher(game, service_name: str):
-    async def on_publish(message: Message, bot: Bot, config: Config):
+    async def on_publish(message: Message, bot: Bot, config: Config, **data):
         """Защита от дурака: сначала пост админу в личку и вопрос, в канал — только после «Да»."""
         if not _is_admin(message, config):
             return
-        html = game.post_html()
-        await bot.send_rich_message(chat_id=message.chat.id, rich_message=InputRichMessage(html=html))
+        prepare = getattr(game, "prepare_publication", None)
+        html, publication = prepare() if prepare else (game.post_html(), None)
+        preview = await bot.send_rich_message(chat_id=message.chat.id, rich_message=InputRichMessage(html=html))
+        if publication is not None:
+            game.on_preview(data[service_name], preview.chat.id, preview.message_id, publication)
         # канал в вопросе — чтобы было видно, куда уйдёт пост; имя не узнали — показываем id из .env
         channel = await channel_mention(bot, config) or str(config.channel_id)
         question = await message.answer(CONFIRM_QUESTION.format(channel=channel), reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="Да", callback_data=CONFIRM_YES),
                               InlineKeyboardButton(text="Нет", callback_data=CONFIRM_NO)]]))
-        _pending[(message.chat.id, question.message_id)] = (game, service_name, html)
+        _pending[(message.chat.id, question.message_id)] = (game, service_name, html, publication)
         log.info("%s: предпросмотр для user=%s", game.COMMAND, message.from_user.id)
     return on_publish
 
@@ -156,7 +161,7 @@ async def on_confirm(cq: CallbackQuery, bot: Bot, config: Config, **data):
         await cq.answer("Вопрос устарел — отправьте команду публикации ещё раз")
         await cq.message.edit_reply_markup(reply_markup=None)
         return
-    game, service_name, html = pending
+    game, service_name, html, publication = pending
     if cq.data == CONFIRM_NO:
         await cq.message.edit_text(f"«{game.TITLE}»: пост не опубликован.")
         await cq.answer()
@@ -170,7 +175,10 @@ async def on_confirm(cq: CallbackQuery, bot: Bot, config: Config, **data):
                                    "Проверьте, что бот — админ канала с правом публикации.")
         await cq.answer()
         return
-    game.on_published(data[service_name], sent.chat.id, sent.message_id)
+    if publication is None:
+        game.on_published(data[service_name], sent.chat.id, sent.message_id)
+    else:
+        game.on_published(data[service_name], sent.chat.id, sent.message_id, publication=publication)
     log.info("%s: опубликован пост %s в %s (user=%s)", game.COMMAND, sent.message_id, sent.chat.id,
              cq.from_user.id)
     channel = await channel_mention(bot, config) or str(config.channel_id)

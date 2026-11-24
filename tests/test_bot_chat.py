@@ -11,7 +11,7 @@ from aiogram.types import Message, Update, User
 
 from bot import admin, fallback
 from bot.config import Config
-from games import memory, phone
+from games import memory, oplatit_button, phone
 from games.memory.service import CHAT_GAME as MEMORY_CHAT_GAME
 from games.phone.service import CHAT_GAME as PHONE_CHAT_GAME
 
@@ -53,8 +53,9 @@ def env(tmp_path):
     db = str(tmp_path / "game.db")
     config = Config("1:x", CHANNEL, frozenset({ADMIN}), db, 7)
     ms, ps = memory.create_service(db, 86400), phone.create_service(db, 86400)
-    dp = Dispatcher(config=config, service=ms, phone_service=ps)
-    dp.include_routers(admin.router, memory.router, phone.router, fallback.router)
+    oplatit_service = oplatit_button.create_service(db, 86400)
+    dp = Dispatcher(config=config, service=ms, phone_service=ps, oplatit_service=oplatit_service)
+    dp.include_routers(admin.router, memory.router, phone.router, oplatit_button.router, fallback.router)
     session = FakeSession()
     bot = Bot("1:x", session=session)
     counter = itertools.count(1)
@@ -82,7 +83,7 @@ def env(tmp_path):
         }})
 
     yield start, press, ms, ps, session
-    for r in (admin.router, memory.router, phone.router, fallback.router):
+    for r in (admin.router, memory.router, phone.router, oplatit_button.router, fallback.router):
         r._parent_router = None
 
 

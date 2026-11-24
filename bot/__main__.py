@@ -6,7 +6,7 @@ import logging
 
 from aiogram import Bot, Dispatcher
 
-from games import memory, phone
+from games import memory, oplatit_button, phone
 from games.memory.handlers import resume_pending_flips
 
 from . import admin, fallback
@@ -33,10 +33,12 @@ async def main():
     ttl = config.session_ttl_days * 86400
     memory_service = memory.create_service(config.db_path, ttl)
     phone_service = phone.create_service(config.db_path, ttl)
+    oplatit_service = oplatit_button.create_service(config.db_path, ttl)
     bot = Bot(config.bot_token)
     # service — имя, под которым роутер мемори получает свой сервис
-    dp = Dispatcher(config=config, service=memory_service, phone_service=phone_service)
-    dp.include_routers(admin.router, memory.router, phone.router, fallback.router)
+    dp = Dispatcher(config=config, service=memory_service, phone_service=phone_service,
+                    oplatit_service=oplatit_service)
+    dp.include_routers(admin.router, memory.router, phone.router, oplatit_button.router, fallback.router)
     await admin.setup_menu(bot, config)
     resume_pending_flips(bot, memory_service)
     cleanup = asyncio.create_task(cleanup_loop(memory_service, phone_service))

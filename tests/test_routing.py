@@ -10,7 +10,7 @@ from aiogram.types import Message, Update, User
 
 from bot import admin, fallback
 from bot.config import Config
-from games import memory, phone
+from games import memory, oplatit_button, phone
 
 CHAT, USER, MEMORY_POST, PHONE_POST = -100, 111, 5, 6
 
@@ -25,9 +25,12 @@ class FakeSession(BaseSession):
             return User.model_validate({"id": 1, "is_bot": True, "first_name": "b", "username": "test_bot"})
         self.calls.append(method)
         if type(method).__name__ == "SendRichMessage":
+            ephemeral = method.ephemeral_message_parameters is not None
             return Message.model_validate({
-                "message_id": 0, "date": 0, "chat": {"id": CHAT, "type": "channel"},
-                "ephemeral_message_id": 900 + len(self.calls),
+                "message_id": 0 if ephemeral else 500 + len(self.calls), "date": 0,
+                "chat": {"id": method.chat_id,
+                         "type": "private" if int(method.chat_id) > 0 else "channel"},
+                **({"ephemeral_message_id": 900 + len(self.calls)} if ephemeral else {}),
             })
         if type(method).__name__ == "SendMessage":
             return Message.model_validate({
@@ -48,8 +51,9 @@ def env(tmp_path):
     db = str(tmp_path / "game.db")
     config = Config("1:x", CHAT, frozenset({USER}), db, 7)
     ms, ps = memory.create_service(db, 86400), phone.create_service(db, 86400)
-    dp = Dispatcher(config=config, service=ms, phone_service=ps)
-    dp.include_routers(admin.router, memory.router, phone.router, fallback.router)
+    oplatit_service = oplatit_button.create_service(db, 86400)
+    dp = Dispatcher(config=config, service=ms, phone_service=ps, oplatit_service=oplatit_service)
+    dp.include_routers(admin.router, memory.router, phone.router, oplatit_button.router, fallback.router)
     session = FakeSession()
     bot = Bot("1:x", session=session)
     counter = iter(range(1, 10**6))
@@ -68,7 +72,7 @@ def env(tmp_path):
         return [type(c).__name__ for c in session.calls], session.calls
 
     yield press, ms, ps
-    for r in (admin.router, memory.router, phone.router, fallback.router):
+    for r in (admin.router, memory.router, phone.router, oplatit_button.router, fallback.router):
         r._parent_router = None  # роутеры модульные — отцепляем, чтобы подключить в следующем тесте
 
 
@@ -153,10 +157,11 @@ def command(env, tmp_path):
     session = FakeSession()
     bot = Bot("1:x", session=session)
     dp = Dispatcher(config=Config("1:x", CHAT, frozenset({USER}), str(tmp_path / "game.db"), 7),
-                    service=ms, phone_service=ps)
-    for r in (admin.router, memory.router, phone.router, fallback.router):
+                    service=ms, phone_service=ps,
+                    oplatit_service=oplatit_button.create_service(str(tmp_path / "game.db"), 86400))
+    for r in (admin.router, memory.router, phone.router, oplatit_button.router, fallback.router):
         r._parent_router = None
-    dp.include_routers(admin.router, memory.router, phone.router, fallback.router)
+    dp.include_routers(admin.router, memory.router, phone.router, oplatit_button.router, fallback.router)
     counter = iter(range(10**6, 2 * 10**6))
 
     def feed(update):
@@ -248,15 +253,17 @@ def test_non_admin_cannot_publish(command):
     send, _ = command
     assert send("/post_phone", user=999) == []
     assert send("/memory", user=999) == []
+    assert send("/oplatit_button", user=999) == []
     assert send("/stats", user=999) == []
 
 
 def test_games_and_stats(command):
     send, _ = command
     (reply,) = send("/games")
-    assert "/memory" in reply.text and "/post_phone" in reply.text and "/stats" in reply.text
+    assert all(command in reply.text for command in ("/memory", "/post_phone", "/oplatit_button", "/stats"))
     (reply,) = send("/stats")
     assert "«Мемори»" in reply.text and "«Взломайте телефон»" in reply.text
+    assert oplatit_button.TITLE in reply.text
 
 
 def test_menu_only_for_admins():
@@ -266,7 +273,7 @@ def test_menu_only_for_admins():
     asyncio.run(admin.setup_menu(bot, config))
     assert sorted(c.scope.chat_id for c in session.calls) == sorted([USER, 222])
     names = [cmd.command for cmd in session.calls[0].commands]
-    assert names == ["memory", "post_phone", "stats", "games"]
+    assert names == ["memory", "post_phone", "oplatit_button", "stats", "games"]
 
 
 def test_view_cell_on_screen_does_nothing(env):

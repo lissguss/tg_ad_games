@@ -40,11 +40,12 @@ async def show(bot: Bot, chat_id: int, html: str, stale_ids: tuple[int | None, .
     return sent.message_id
 
 
-async def show_in_post(bot: Bot, cq: CallbackQuery, html: str) -> int:
+async def show_in_post(bot: Bot, cq: CallbackQuery, html: str | InputRichMessage) -> int:
     """Открыть личный экран на месте поста, в котором нажали кнопку. Возвращает его id."""
+    content = InputRichMessage(html=html) if isinstance(html, str) else html
     sent = await bot.send_rich_message(
         chat_id=cq.message.chat.id,
-        rich_message=InputRichMessage(html=html),
+        rich_message=content,
         ephemeral_message_parameters=EphemeralMessageParameters(
             receiver_user_id=cq.from_user.id,
             callback_query_id=cq.id,
