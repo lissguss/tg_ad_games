@@ -210,7 +210,7 @@ def test_cover_uploads_prepared_mp4_with_metadata_and_thumbnail(env):
     files = {}
     encoded = json.loads(env.session.prepare_value(message, bot=env.bot, files=files))
     media = encoded["media"][0]["media"]
-    assert (media["width"], media["height"], media["duration"]) == (1000, 1000, 9)
+    assert (media["width"], media["height"], media["duration"]) == (1080, 1080, 3)
     references = [media["media"], media["thumbnail"]]
     assert len(set(references)) == 2 and len(files) == 2
     assert all(ref.startswith("attach://") and ref.removeprefix("attach://") in files

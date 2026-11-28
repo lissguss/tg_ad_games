@@ -9,10 +9,10 @@ from aiogram.types import FSInputFile, InputMediaAnimation, InputRichMessage, In
 ROOT = Path(__file__).resolve().parent
 INTRO_FILE = ROOT / "intro.txt"
 POST_FILE = ROOT / "post.html"
-# Исходный GIF сохраняется отдельно; в rich-пост загружается его H.264-копия.
-COVER_FILE = ROOT / "cover_oplatit_button_telegram.mp4"
+# Подготовленная H.264-анимация для отправки в rich-пост.
+COVER_FILE = ROOT / "cover_oplatit_button_final.mp4"
 COVER_THUMBNAIL = ROOT / "cover_oplatit_button_thumbnail.jpg"
-COVER_WIDTH, COVER_HEIGHT, COVER_DURATION = 1000, 1000, 9
+COVER_WIDTH, COVER_HEIGHT, COVER_DURATION = 1080, 1080, 3
 COVER_ID = "oplatit_cover"
 COVER_HTML = f'<video src="tg://video?id={COVER_ID}"></video>'
 
